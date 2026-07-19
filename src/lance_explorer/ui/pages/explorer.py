@@ -3,8 +3,8 @@ from __future__ import annotations
 import streamlit as st
 
 from lance_explorer.config import AppConfig
-from lance_explorer.paths import is_lance_table_path, join_uri, make_upath, normalize_uri
-from lance_explorer.ui.cache import cached_table_names, children_for_uri
+from lance_explorer.paths import is_lance_table_path, make_upath
+from lance_explorer.ui.cache import children_for_uri
 from lance_explorer.ui.components.code_export import show_code_export
 from lance_explorer.ui.components.common import template_directory
 from lance_explorer.ui.help_text import help_text
@@ -37,10 +37,12 @@ def _entry_type(is_dir: bool, is_table: bool) -> str:
     return "file"
 
 
-def _entry_icon(entry_type: str) -> str:
+def _entry_icon(entry_type: str, *, selected: bool = False) -> str:
+    if selected:
+        return "\u2b50"
     return {
-        "directory": "📁",
-        "table": "✳️",
+        "directory": "\U0001f4c1",
+        "table": "\u2733\ufe0f",
         "file": ":material/draft:",
     }[entry_type]
 
@@ -49,6 +51,13 @@ def _entry_label(name: str, entry_type: str) -> str:
     if entry_type == "directory":
         return f"{name}/"
     return name
+
+
+def _selected_entry_label(name: str, entry_type: str, *, selected: bool) -> str:
+    label = _entry_label(name, entry_type)
+    if selected:
+        return f"-> {label}"
+    return label
 
 
 def _entry_sort_key(entry) -> tuple[int, str]:
@@ -89,12 +98,12 @@ def _inject_explorer_styles() -> None:
         """
         <style>
         .st-key-directory-listing div[data-testid="stButton"] {
-            margin-bottom: -0.75rem;
-            min-height: 1.2rem;
+            margin-bottom: 0;
+            min-height: 1.75rem;
         }
         .st-key-directory-listing div[data-testid="stButton"] button[kind="tertiary"] {
             justify-content: flex-start;
-            min-height: 1.2rem;
+            min-height: 1.75rem;
             padding: 0 0.1rem;
             text-align: left;
         }
@@ -103,7 +112,7 @@ def _inject_explorer_styles() -> None:
             color: #1f6feb;
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
             font-size: 0.86rem;
-            line-height: 1;
+            line-height: 2;
             overflow: hidden;
             text-decoration: underline;
             text-overflow: ellipsis;
@@ -139,7 +148,7 @@ def render(config: AppConfig) -> None:
         except ValueError as exc:
             st.error(str(exc))
 
-    controls = st.columns([1, 1, 1, 1, 1, 1, 8])
+    controls = st.columns([1, 1, 1, 1, 1, 9])
     if _icon_button(controls[0], "Back", ":material/arrow_back:") and navigate_back():
         st.rerun()
     if _icon_button(controls[1], "Forward", ":material/arrow_forward:") and navigate_forward():
@@ -153,16 +162,6 @@ def render(config: AppConfig) -> None:
     if _icon_button(controls[4], "Refresh", ":material/refresh:"):
         bump_generation(current_uri)
         st.rerun()
-    if controls[5].button(
-        "",
-        key="explorer-select-current-table",
-        help="Select table",
-        icon=":material/check:",
-        width="stretch",
-        disabled=not is_lance_table_path(current_uri),
-    ):
-        select_table(current_uri)
-        st.success("Selected table")
 
     current_uri = st.session_state.current_uri
     st.caption(current_uri)
@@ -186,9 +185,10 @@ def render(config: AppConfig) -> None:
         entries = []
 
     st.subheader("Directory Listing")
+    if "explorer_lance_only" not in st.session_state:
+        st.session_state["explorer_lance_only"] = True
     lance_only = st.checkbox(
         "Hide non-Lance files",
-        value=st.session_state.get("explorer_lance_only", False),
         key="explorer_lance_only",
         help="Show folders and .lance tables only.",
     )
@@ -198,16 +198,18 @@ def render(config: AppConfig) -> None:
     if not entries:
         st.caption("No child paths found.")
     with st.container(key="directory-listing", gap=None):
+        selected_table = st.session_state.get("selected_table_uri", "")
         for index, entry in enumerate(entries):
             entry_type = _entry_type(entry.is_dir, entry.is_table)
+            is_selected = entry.is_table and entry.uri == selected_table
             help_label = (
                 "Select table" if entry.is_table else "Open folder" if entry.is_dir else "View path"
             )
             if st.button(
-                _entry_label(entry.name, entry_type),
+                _selected_entry_label(entry.name, entry_type, selected=is_selected),
                 key=f"entry-{index}-{entry.uri}",
                 help=f"{help_label}: {entry.uri}",
-                icon=_entry_icon(entry_type),
+                icon=_entry_icon(entry_type, selected=is_selected),
                 type="tertiary",
             ):
                 if entry.is_table:
@@ -217,36 +219,3 @@ def render(config: AppConfig) -> None:
                 else:
                     navigate(entry.uri)
                 st.rerun()
-
-    st.subheader("LanceDB database", help=help_text("database"))
-    with st.form("probe_database"):
-        probe = st.form_submit_button("List tables at this URI", help=help_text("database"))
-    if probe:
-        try:
-            st.session_state["explorer_tables"] = {
-                "uri": current_uri,
-                "names": cached_table_names(current_uri, generation),
-            }
-        except Exception as exc:
-            st.session_state["explorer_tables"] = {"uri": current_uri, "names": []}
-            st.error(f"Unable to open this URI as a LanceDB database: {exc}")
-
-    saved_tables = st.session_state.get("explorer_tables", {})
-    table_names = saved_tables.get("names", []) if saved_tables.get("uri") == current_uri else []
-    for table_name in table_names:
-        table_uri = join_uri(current_uri, f"{table_name}.lance")
-        if st.button(
-            f"{table_name}.lance",
-            key=f"db-table-{table_name}",
-            help=f"Select table: {table_uri}",
-            icon="✳️",
-            type="tertiary",
-        ):
-            select_table(table_uri)
-            st.rerun()
-
-    show_code_export(
-        "connect",
-        {"database_uri": normalize_uri(current_uri)},
-        template_directory=template_directory(config),
-    )

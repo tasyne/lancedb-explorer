@@ -10,6 +10,7 @@ def initialize_state(config: AppConfig) -> None:
     defaults = {
         "current_uri": normalize_uri(config.home_uri),
         "selected_table_uri": "",
+        "selected_table_history": [],
         "navigation_history": [normalize_uri(config.home_uri)],
         "navigation_index": 0,
         "cache_generations": {},
@@ -69,6 +70,12 @@ def select_table(uri: str) -> None:
         st.session_state.pop("table_preview", None)
         st.session_state.pop("table_schema_diff", None)
     st.session_state.selected_table_uri = normalized
+    history = [
+        item
+        for item in st.session_state.get("selected_table_history", [])
+        if item != normalized
+    ]
+    st.session_state.selected_table_history = [normalized, *history][:20]
 
 
 def generation_for(resource_uri: str) -> int:
