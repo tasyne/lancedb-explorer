@@ -26,8 +26,14 @@ def _refresh_after_mutation(table_uri: str) -> None:
     st.session_state.pop("table_schema_diff", None)
 
 
+def _show_status_once() -> None:
+    if message := st.session_state.pop("index_status", None):
+        st.success(message)
+
+
 def render(config: AppConfig) -> None:
     st.title("Indexes")
+    _show_status_once()
     table_uri = table_uri_control(key="index-table-open")
     if not table_uri:
         return
@@ -43,13 +49,14 @@ def render(config: AppConfig) -> None:
 
     st.subheader("Existing indexes", help=help_text("existing_indexes"))
     indexes = snapshot.get("indexes", [])
-    st.dataframe(pd.DataFrame(indexes), use_container_width=True)
+    st.dataframe(pd.DataFrame(indexes), width="stretch")
 
     st.subheader("Create index", help=help_text("create_index"))
     with st.popover("Index type guide", icon=":material/info:"):
         for index_definition in available_index_definitions():
-            st.markdown(f"**{index_definition.label}** — {index_definition.description}")
+            st.markdown(f"**{index_definition.label}** - {index_definition.description}")
         st.caption("After writes, Optimize folds new rows into existing indexes.")
+
     column_names = schema.names
     selected_column = st.selectbox("Column", column_names)
     field = schema.field(selected_column)
@@ -58,46 +65,30 @@ def render(config: AppConfig) -> None:
         st.warning(f"No registered non-vector index type supports {field.type}.")
     else:
         labels = {
-            definition.key: f"{definition.label} — {definition.description}"
+            definition.key: f"{definition.label} - {definition.description}"
             for definition in definitions
         }
-        with st.form("create-index"):
-            selected_type = st.selectbox(
-                "Index type",
-                list(labels),
-                format_func=labels.get,
-                help=help_text("create_index"),
-            )
-            index_name = st.text_input("Index name (optional)")
-            replace = st.checkbox(
-                "Replace an index with the same name", help=help_text("replace_index")
-            )
-            with_position = st.checkbox(
-                "Store token positions (FTS only)",
-                value=True,
-                disabled=selected_type != "FTS",
-                help=help_text("fts_positions"),
-            )
-            create = st.form_submit_button("Create index")
+        selected_type = st.selectbox(
+            "Index type",
+            list(labels),
+            format_func=labels.get,
+            help=help_text("create_index"),
+        )
+        index_name = st.text_input("Index name (optional)")
+        replace = st.checkbox(
+            "Replace an index with the same name",
+            help=help_text("replace_index"),
+        )
+        with_position = st.checkbox(
+            "Store token positions (FTS only)",
+            value=True,
+            disabled=selected_type != "FTS",
+            help=help_text("fts_positions"),
+        )
 
         config_options: dict[str, object] = {}
         if selected_type == "FTS":
             config_options["with_position"] = with_position
-
-        if create:
-            try:
-                st.session_state.operation_results["create_index"] = repository.create_index(
-                    table_uri,
-                    column=selected_column,
-                    index_type=selected_type,
-                    name=index_name.strip() or None,
-                    replace=replace,
-                    config_options=config_options,
-                )
-                _refresh_after_mutation(table_uri)
-                st.success("Index created")
-            except Exception as exc:
-                st.error(str(exc))
 
         definition = next(item for item in definitions if item.key == selected_type)
         show_code_export(
@@ -113,25 +104,58 @@ def render(config: AppConfig) -> None:
             template_directory=template_directory(config),
         )
 
+        with st.form("create-index"):
+            create_confirmation = st.checkbox(
+                "I understand this will modify the selected table metadata."
+            )
+            create = st.form_submit_button("Create index")
+        if create:
+            if not create_confirmation:
+                st.error("Confirm that you want to create this index.")
+            else:
+                try:
+                    st.session_state.operation_results["create_index"] = repository.create_index(
+                        table_uri,
+                        column=selected_column,
+                        index_type=selected_type,
+                        name=index_name.strip() or None,
+                        replace=replace,
+                        config_options=config_options,
+                    )
+                    _refresh_after_mutation(table_uri)
+                    st.session_state["index_status"] = "Index created"
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
     st.subheader("Drop index", help=help_text("drop_index"))
     index_names = [str(item.get("name", "")) for item in indexes if item.get("name")]
     if not index_names:
         st.caption("No named indexes are available.")
     else:
-        with st.form("drop-index"):
-            drop_name = st.selectbox("Index", index_names)
-            drop = st.form_submit_button("Drop index")
-        if drop:
-            try:
-                st.session_state.operation_results["drop_index"] = repository.drop_index(
-                    table_uri, drop_name
-                )
-                _refresh_after_mutation(table_uri)
-                st.success("Index dropped. Optimize later to remove unreferenced files.")
-            except Exception as exc:
-                st.error(str(exc))
+        drop_name = st.selectbox("Index", index_names)
         show_code_export(
             "drop_index",
             {"table_uri": table_uri, "index_name": drop_name},
             template_directory=template_directory(config),
         )
+        with st.form("drop-index"):
+            st.caption("Type the exact index name to confirm deletion.")
+            st.code(drop_name, language="text")
+            drop_confirmation = st.text_input("Index name")
+            drop = st.form_submit_button("Drop index")
+        if drop:
+            if drop_confirmation != drop_name:
+                st.error("The index name does not match.")
+            else:
+                try:
+                    st.session_state.operation_results["drop_index"] = repository.drop_index(
+                        table_uri, drop_name
+                    )
+                    _refresh_after_mutation(table_uri)
+                    st.session_state["index_status"] = (
+                        "Index dropped. Optimize later to remove unreferenced files."
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))

@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from lance_explorer.config import AppConfig
-from lance_explorer.paths import is_lance_table_path, join_uri, normalize_uri
+from lance_explorer.paths import is_lance_table_path, join_uri, make_upath, normalize_uri
 from lance_explorer.ui.cache import cached_table_names, children_for_uri
 from lance_explorer.ui.components.code_export import show_code_export
 from lance_explorer.ui.components.common import template_directory
@@ -25,22 +25,22 @@ def _icon_button(container: st.delta_generator.DeltaGenerator, label: str, icon:
         key=f"explorer-{label.lower().replace(' ', '-')}",
         help=label,
         icon=icon,
-        use_container_width=True,
+        width="stretch",
     )
 
 
 def _entry_type(is_dir: bool, is_table: bool) -> str:
-    if is_dir:
-        return "directory"
     if is_table:
         return "table"
+    if is_dir:
+        return "directory"
     return "file"
 
 
 def _entry_icon(entry_type: str) -> str:
     return {
-        "directory": ":material/folder:",
-        "table": ":material/table:",
+        "directory": "📁",
+        "table": "✳️",
         "file": ":material/draft:",
     }[entry_type]
 
@@ -51,29 +51,67 @@ def _entry_label(name: str, entry_type: str) -> str:
     return name
 
 
+def _entry_sort_key(entry) -> tuple[int, str]:
+    entry_type = _entry_type(entry.is_dir, entry.is_table)
+    rank = {"table": 0, "directory": 1, "file": 2}[entry_type]
+    return rank, entry.name.lower()
+
+
+def _breadcrumb_items(uri: str) -> list[tuple[str, str]]:
+    path = make_upath(uri)
+    items: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    while True:
+        path_uri = str(path)
+        if path_uri in seen:
+            break
+        seen.add(path_uri)
+        items.append((path.name or path_uri, path_uri))
+        parent = path.parent
+        if str(parent) == path_uri:
+            break
+        path = parent
+    return list(reversed(items))
+
+
+def _render_breadcrumbs(current_uri: str) -> None:
+    with st.container(key="explorer-breadcrumbs", horizontal=True, gap="small"):
+        for index, (label, uri) in enumerate(_breadcrumb_items(current_uri)):
+            if index:
+                st.markdown("/")
+            if st.button(label, key=f"breadcrumb-{index}-{uri}", help=uri, type="tertiary"):
+                navigate(uri)
+                st.rerun()
+
+
 def _inject_explorer_styles() -> None:
     st.markdown(
         """
         <style>
-        div[data-testid="stVerticalBlock"] div[data-testid="stButton"] {
-            margin-bottom: -0.45rem;
+        .st-key-directory-listing div[data-testid="stButton"] {
+            margin-bottom: -0.75rem;
+            min-height: 1.2rem;
         }
-        div[data-testid="stButton"] button[kind="tertiary"] {
+        .st-key-directory-listing div[data-testid="stButton"] button[kind="tertiary"] {
             justify-content: flex-start;
-            min-height: 1.7rem;
-            padding: 0.08rem 0.15rem;
+            min-height: 1.2rem;
+            padding: 0 0.1rem;
             text-align: left;
         }
-        div[data-testid="stButton"] button[kind="tertiary"] p {
+        .st-key-directory-listing div[data-testid="stButton"] button[kind="tertiary"] p,
+        .st-key-explorer-breadcrumbs div[data-testid="stButton"] button[kind="tertiary"] p {
             color: #1f6feb;
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            font-size: 0.92rem;
-            line-height: 1.2;
+            font-size: 0.86rem;
+            line-height: 1;
             overflow: hidden;
             text-decoration: underline;
             text-overflow: ellipsis;
             text-underline-offset: 0.15rem;
             white-space: nowrap;
+        }
+        .st-key-explorer-breadcrumbs {
+            align-items: center;
         }
         </style>
         """,
@@ -93,7 +131,7 @@ def render(config: AppConfig) -> None:
     with st.form("uri_bar"):
         uri_col, go_col = st.columns([7, 1], vertical_alignment="bottom")
         entered_uri = uri_col.text_input("URI", key="uri_bar_value", label_visibility="collapsed")
-        go = go_col.form_submit_button("Go", use_container_width=True)
+        go = go_col.form_submit_button("Go", width="stretch")
     if go:
         try:
             navigate(entered_uri)
@@ -120,7 +158,7 @@ def render(config: AppConfig) -> None:
         key="explorer-select-current-table",
         help="Select table",
         icon=":material/check:",
-        use_container_width=True,
+        width="stretch",
         disabled=not is_lance_table_path(current_uri),
     ):
         select_table(current_uri)
@@ -128,13 +166,14 @@ def render(config: AppConfig) -> None:
 
     current_uri = st.session_state.current_uri
     st.caption(current_uri)
+    _render_breadcrumbs(current_uri)
 
     if is_lance_table_path(current_uri):
         select_table(current_uri)
         st.info("This URI looks like a Lance table and is now the selected table.")
         show_code_export(
             "open_table",
-            {"table_uri": current_uri},
+            {"table_uri": current_uri, "open_version": None},
             template_directory=template_directory(config),
         )
         return
@@ -146,29 +185,38 @@ def render(config: AppConfig) -> None:
         st.error(f"Unable to list this URI: {exc}")
         entries = []
 
-    st.subheader("Children")
+    st.subheader("Directory Listing")
+    lance_only = st.checkbox(
+        "Hide non-Lance files",
+        value=st.session_state.get("explorer_lance_only", False),
+        key="explorer_lance_only",
+        help="Show folders and .lance tables only.",
+    )
+    if lance_only:
+        entries = [entry for entry in entries if entry.is_dir or entry.is_table]
+    entries = sorted(entries, key=_entry_sort_key)
     if not entries:
         st.caption("No child paths found.")
-    for index, entry in enumerate(entries):
-        entry_type = _entry_type(entry.is_dir, entry.is_table)
-        help_label = (
-            "Open folder" if entry.is_dir else "Select table" if entry.is_table else "View path"
-        )
-        if st.button(
-            _entry_label(entry.name, entry_type),
-            key=f"entry-{index}-{entry.uri}",
-            help=f"{help_label}: {entry.uri}",
-            icon=_entry_icon(entry_type),
-            type="tertiary",
-            use_container_width=True,
-        ):
-            if entry.is_dir:
-                navigate(entry.uri)
-            elif entry.is_table:
-                select_table(entry.uri)
-            else:
-                navigate(entry.uri)
-            st.rerun()
+    with st.container(key="directory-listing", gap=None):
+        for index, entry in enumerate(entries):
+            entry_type = _entry_type(entry.is_dir, entry.is_table)
+            help_label = (
+                "Select table" if entry.is_table else "Open folder" if entry.is_dir else "View path"
+            )
+            if st.button(
+                _entry_label(entry.name, entry_type),
+                key=f"entry-{index}-{entry.uri}",
+                help=f"{help_label}: {entry.uri}",
+                icon=_entry_icon(entry_type),
+                type="tertiary",
+            ):
+                if entry.is_table:
+                    select_table(entry.uri)
+                elif entry.is_dir:
+                    navigate(entry.uri)
+                else:
+                    navigate(entry.uri)
+                st.rerun()
 
     st.subheader("LanceDB database", help=help_text("database"))
     with st.form("probe_database"):
@@ -191,7 +239,7 @@ def render(config: AppConfig) -> None:
             f"{table_name}.lance",
             key=f"db-table-{table_name}",
             help=f"Select table: {table_uri}",
-            icon=":material/table:",
+            icon="✳️",
             type="tertiary",
         ):
             select_table(table_uri)

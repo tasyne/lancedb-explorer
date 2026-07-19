@@ -39,9 +39,12 @@ def display_result(result: Any) -> None:
     if result is None:
         return
     if isinstance(result, pd.DataFrame):
-        st.dataframe(result, use_container_width=True)
+        st.dataframe(result, width="stretch")
         return
     if isinstance(result, dict):
+        if not result:
+            st.info("Operation completed. LanceDB returned no additional details.")
+            return
         st.json(result)
         return
     st.write(result)

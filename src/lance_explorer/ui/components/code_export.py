@@ -32,10 +32,11 @@ def show_code_export(
     context: dict[str, object],
     *,
     template_directory: str | None = None,
-    label: str = "Code export",
+    label: str | None = None,
 ) -> None:
     renderer = get_template_renderer(template_directory)
     spec = renderer.registry.get(template_id)
+    expander_label = label or f"Code export: {spec.title}"
     context_json = json.dumps(context, sort_keys=True, default=str)
     code = render_code(
         template_id,
@@ -44,7 +45,7 @@ def show_code_export(
         renderer.registry.fingerprint(template_id),
     )
 
-    with st.expander(label, expanded=False, icon=":material/code:"):
+    with st.expander(expander_label, expanded=False, icon=":material/code:"):
         st.caption(spec.title, help=help_text("code_export"))
         st.code(code, language=spec.language, line_numbers=False)
         _copy_button(code, key_prefix=template_id)

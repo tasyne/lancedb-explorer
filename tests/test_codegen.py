@@ -57,7 +57,7 @@ def test_all_python_templates_render_as_valid_python() -> None:
     renderer = TemplateRenderer()
     contexts = {
         "connect": {"database_uri": "/tmp/db"},
-        "open_table": {"table_uri": "/tmp/db/items.lance"},
+        "open_table": {"table_uri": "/tmp/db/items.lance", "open_version": None},
         "filter_query": {
             "table_uri": "/tmp/db/items.lance",
             "columns": ["id"],

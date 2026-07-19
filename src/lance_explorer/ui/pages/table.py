@@ -15,6 +15,28 @@ from lance_explorer.ui.help_text import help_text
 from lance_explorer.ui.state import generation_for
 
 
+def _version_numbers(versions: list[dict[str, object]], current_version: object) -> list[int]:
+    numbers: set[int] = set()
+    for item in versions:
+        value = item.get("version")
+        if isinstance(value, int):
+            numbers.add(value)
+    if isinstance(current_version, int):
+        numbers.add(current_version)
+    return sorted(numbers)
+
+
+def _sync_schema_diff_defaults(table_uri: str, version_numbers: list[int]) -> None:
+    if not version_numbers:
+        return
+    defaults = (table_uri, version_numbers[0], version_numbers[-1])
+    if st.session_state.get("schema_diff_defaults") == defaults:
+        return
+    st.session_state["schema_diff_defaults"] = defaults
+    st.session_state["schema-left-version"] = str(version_numbers[0])
+    st.session_state["schema-right-version"] = str(version_numbers[-1])
+
+
 def render(config: AppConfig) -> None:
     st.title("Table")
     table_uri = table_uri_control(key="table-open-form")
@@ -29,36 +51,40 @@ def render(config: AppConfig) -> None:
         st.error(f"Unable to open table: {exc}")
         return
 
+    try:
+        versions = cached_versions(table_uri, generation)
+    except Exception as exc:
+        versions = []
+        st.warning(f"Unable to load table versions: {exc}")
+    version_numbers = _version_numbers(versions, snapshot["version"])
+    _sync_schema_diff_defaults(table_uri, version_numbers)
+
     metrics = st.columns(4)
     metrics[0].metric("Rows", snapshot["row_count"], help=help_text("rows"))
     metrics[1].metric("Version", snapshot["version"], help=help_text("version"))
     statistics = snapshot.get("statistics", {})
     fragment_stats = statistics.get("fragment_stats", {})
     metrics[2].metric(
-        "Fragments", fragment_stats.get("num_fragments", "—"), help=help_text("fragments")
+        "Fragments", fragment_stats.get("num_fragments", "-"), help=help_text("fragments")
     )
     metrics[3].metric("Indices", len(snapshot.get("indexes", [])), help=help_text("indexes"))
 
     tabs = st.tabs(["Schema", "Statistics", "Versions", "Schema changes", "Indexes", "Sample"])
     with tabs[0]:
         st.caption("Arrow schema", help=help_text("schema"))
-        st.dataframe(pd.DataFrame(snapshot["schema"]), use_container_width=True)
+        st.dataframe(pd.DataFrame(snapshot["schema"]), width="stretch")
         st.code(snapshot["schema_string"], language="text")
     with tabs[1]:
         st.caption("Physical layout", help=help_text("statistics"))
         st.json(statistics)
     with tabs[2]:
         st.caption("Table history", help=help_text("versions"))
-        try:
-            versions = cached_versions(table_uri, generation)
-            st.dataframe(pd.DataFrame(versions), use_container_width=True)
-        except Exception as exc:
-            st.error(str(exc))
+        st.dataframe(pd.DataFrame(versions), width="stretch")
     with tabs[3]:
         st.caption("Historical schema comparison", help=help_text("schema_changes"))
         with st.form("version-schema-diff"):
-            left_text = st.text_input("Left version", placeholder="1")
-            right_text = st.text_input("Right version", placeholder=str(snapshot["version"]))
+            left_text = st.text_input("Left version", key="schema-left-version")
+            right_text = st.text_input("Right version", key="schema-right-version")
             compare = st.form_submit_button("Compare schemas")
         if compare:
             try:
@@ -77,11 +103,11 @@ def render(config: AppConfig) -> None:
                 st.error(str(exc))
         changes = st.session_state.get("table_schema_diff")
         if changes is not None:
-            st.dataframe(pd.DataFrame(changes), use_container_width=True)
+            st.dataframe(pd.DataFrame(changes), width="stretch")
     with tabs[4]:
         st.caption("Secondary indexes", help=help_text("indexes"))
         indexes = snapshot.get("indexes", [])
-        st.dataframe(pd.DataFrame(indexes), use_container_width=True)
+        st.dataframe(pd.DataFrame(indexes), width="stretch")
     with tabs[5]:
         st.caption("Bounded data preview", help=help_text("sample"))
         fields = [row["path"] for row in snapshot["schema"] if "." not in row["path"]]
@@ -100,10 +126,16 @@ def render(config: AppConfig) -> None:
                 st.error(str(exc))
         preview = st.session_state.get("table_preview")
         if preview is not None:
-            st.dataframe(preview, use_container_width=True)
+            st.dataframe(preview, width="stretch")
 
+    code_version_options: list[int | None] = [None, *reversed(version_numbers)]
+    code_version = st.selectbox(
+        "Version for open-table code",
+        code_version_options,
+        format_func=lambda value: "Latest" if value is None else str(value),
+    )
     show_code_export(
         "open_table",
-        {"table_uri": table_uri},
+        {"table_uri": table_uri, "open_version": code_version},
         template_directory=template_directory(config),
     )

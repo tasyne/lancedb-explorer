@@ -15,7 +15,7 @@ from lance_explorer.ui.state import generation_for
 def _display_query_result(result: QueryResult | None) -> None:
     if result is None:
         return
-    st.dataframe(result.rows, use_container_width=True)
+    st.dataframe(result.rows, width="stretch")
     if result.plan:
         st.code(result.plan, language="text")
 

@@ -31,6 +31,31 @@ Or after installation:
 lance-explorer
 ```
 
+## Create demo data
+
+The CLI can also create a local demo Lance table instead of launching Streamlit:
+
+```bash
+lance-explorer --create-demo-data ./demo/movie_stars.lance
+```
+
+By default this creates 100 fictional movie-star/PII rows across three Lance table
+versions. Version 2 adds a `publicity_risk` field so the Table page can demonstrate
+schema history and schema diffing.
+
+Useful options:
+
+```bash
+lance-explorer --create-demo-data ./demo/movie_stars.lance --faker-locale spanish
+lance-explorer --create-demo-data ./demo/movie_stars.lance --faker-locale chinese --demo-rows 250
+lance-explorer --create-demo-data ./demo/movie_stars.lance --demo-versions 4 --demo-seed 42
+lance-explorer --create-demo-data ./demo/movie_stars.lance --overwrite-demo-data
+```
+
+The hard-coded Faker locale aliases live in
+`src/lance_explorer/demo_data.py` as `FAKER_LOCALE_ALIASES`. Alias examples include
+`usa`, `spanish`, `chinese`, `japanese`, `french`, `german`, `india`, and `brazil`.
+
 ## Runtime environment variables
 
 Credentials are resolved from the runtime environment by LanceDB and `s3fs`. Generated code never includes their values.

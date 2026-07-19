@@ -45,7 +45,7 @@ def render(config: AppConfig) -> None:
         metrics[1].metric("Same schema", "Yes" if summary["same_schema"] else "No")
         metrics[2].metric("Same indexes", "Yes" if summary["same_indexes"] else "No")
         st.subheader("Schema changes")
-        st.dataframe(pd.DataFrame(metadata["schema_changes"]), use_container_width=True)
+        st.dataframe(pd.DataFrame(metadata["schema_changes"]), width="stretch")
         with st.expander("Left snapshot"):
             st.json(metadata["left"])
         with st.expander("Right snapshot"):
@@ -92,7 +92,7 @@ def render(config: AppConfig) -> None:
                 continue
             st.subheader(name.replace("_", " ").title())
             if isinstance(value, pd.DataFrame):
-                st.dataframe(value, use_container_width=True)
+                st.dataframe(value, width="stretch")
             else:
                 st.write(value)
 

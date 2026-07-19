@@ -8,7 +8,7 @@ templates:
     file: open_table.py.j2
     title: Open a Lance table
     language: python
-    required_context: [table_uri]
+    required_context: [table_uri, open_version]
   filter_query:
     file: filter_query.py.j2
     title: Run a filter query

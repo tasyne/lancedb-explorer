@@ -2,4 +2,5 @@
 
 table_path = UPath({{ table_uri | pyrepr }})
 db = lancedb.connect(str(table_path.parent), storage_options=storage_options or None)
-table = db.open_table(table_path.name.removesuffix(".lance"))
+open_version = {{ open_version | default(none) | pyrepr }}  # None opens the latest version; use an int for history.
+table = db.open_table(table_path.name.removesuffix(".lance"), version=open_version)
