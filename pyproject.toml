@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lance-explorer"
+version = "0.1.1"
+description = "Local Streamlit management and exploration UI for LanceDB"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "jinja2==3.1.6",
+  "lancedb==0.34.0",
+  "pandas>=2.2,<3",
+  "pyarrow>=18,<22",
+  "pyyaml>=6.0.2,<7",
+  "s3fs==2026.6.0",
+  "streamlit==1.59.2",
+  "universal-pathlib==0.3.10",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<10",
+  "pytest-cov>=6,<8",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+lance-explorer = "lance_explorer.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lance_explorer"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]

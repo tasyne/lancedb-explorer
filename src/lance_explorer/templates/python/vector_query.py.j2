@@ -1,0 +1,11 @@
+{% include "open_table.py.j2" %}
+
+vector = {{ vector | pyrepr }}
+query = table.search(
+    vector,
+    query_type="vector",
+    vector_column_name={{ column | pyrepr }},
+)
+{% if where %}query = query.where({{ where | pyrepr }})
+{% endif %}{% if columns %}query = query.select({{ columns | pyrepr }})
+{% endif %}rows = query.limit({{ limit }}).to_pandas()

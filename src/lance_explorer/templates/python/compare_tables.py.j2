@@ -1,0 +1,32 @@
+{% include "_connection.py.j2" %}
+import pandas as pd
+
+
+def open_table(table_uri: str):
+    path = UPath(table_uri)
+    db = lancedb.connect(str(path.parent), storage_options=storage_options or None)
+    return db.open_table(path.name.removesuffix(".lance"))
+
+
+left = open_table({{ left_uri | pyrepr }})
+right = open_table({{ right_uri | pyrepr }})
+
+columns = {{ columns | pyrepr }}
+limit = {{ limit }}
+left_rows = left.search().select(columns).limit(limit).to_pandas()
+right_rows = right.search().select(columns).limit(limit).to_pandas()
+{% if key %}
+key = {{ key | pyrepr }}
+comparison = left_rows.merge(
+    right_rows,
+    on=key,
+    how="outer",
+    suffixes=("_left", "_right"),
+    indicator=True,
+)
+{% else %}
+comparison = pd.concat(
+    [left_rows.add_prefix("left."), right_rows.add_prefix("right.")],
+    axis=1,
+)
+{% endif %}

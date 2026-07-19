@@ -1,0 +1,4 @@
+{% include "_connection.py.j2" %}
+
+database_path = UPath({{ database_uri | pyrepr }})
+db = lancedb.connect(str(database_path), storage_options=storage_options or None)

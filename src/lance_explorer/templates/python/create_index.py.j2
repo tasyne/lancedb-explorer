@@ -1,0 +1,10 @@
+{% include "open_table.py.j2" %}
+from lancedb.index import {{ config_class }}
+
+config = {{ config_class }}(**{{ config_options | pyrepr }})
+table.create_index(
+    {{ column | pyrepr }},
+    config=config,
+    name={{ index_name | pyrepr }},
+    replace={{ replace }},
+)

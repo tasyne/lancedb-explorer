@@ -1,0 +1,8 @@
+from datetime import timedelta
+
+{% include "open_table.py.j2" %}
+
+result = table.optimize(
+    cleanup_older_than=timedelta(days={{ older_than_days }}),
+    delete_unverified={{ delete_unverified }},
+)

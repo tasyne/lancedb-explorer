@@ -1,0 +1,4 @@
+{% include "open_table.py.j2" %}
+
+table.drop_index({{ index_name | pyrepr }})
+# Run table.optimize() later to remove unreferenced index files from storage.

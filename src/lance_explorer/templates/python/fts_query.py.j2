@@ -1,0 +1,10 @@
+{% include "open_table.py.j2" %}
+
+query = table.search(
+    {{ text | pyrepr }},
+    query_type="fts",
+    fts_columns={{ column | pyrepr }},
+)
+{% if where %}query = query.where({{ where | pyrepr }})
+{% endif %}{% if columns %}query = query.select({{ columns | pyrepr }})
+{% endif %}rows = query.limit({{ limit }}).to_pandas()

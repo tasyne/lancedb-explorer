@@ -1,0 +1,7 @@
+from datetime import timedelta
+
+{% include "open_table.py.j2" %}
+
+{% if cleanup_days is not none %}result = table.optimize(cleanup_older_than=timedelta(days={{ cleanup_days }}))
+{% else %}result = table.optimize()
+{% endif %}

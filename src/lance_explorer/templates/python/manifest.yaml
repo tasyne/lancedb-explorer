@@ -1,0 +1,61 @@
+templates:
+  connect:
+    file: connect.py.j2
+    title: Connect to LanceDB
+    language: python
+    required_context: [database_uri]
+  open_table:
+    file: open_table.py.j2
+    title: Open a Lance table
+    language: python
+    required_context: [table_uri]
+  filter_query:
+    file: filter_query.py.j2
+    title: Run a filter query
+    language: python
+    required_context: [table_uri, columns, where, limit]
+  fts_query:
+    file: fts_query.py.j2
+    title: Run a full-text query
+    language: python
+    required_context: [table_uri, text, column, columns, where, limit]
+  vector_query:
+    file: vector_query.py.j2
+    title: Run a pasted-vector query
+    language: python
+    required_context: [table_uri, vector, column, columns, where, limit]
+  compare_tables:
+    file: compare_tables.py.j2
+    title: Compare two Lance tables
+    language: python
+    required_context: [left_uri, right_uri, columns, key, limit]
+  create_index:
+    file: create_index.py.j2
+    title: Create an index
+    language: python
+    required_context: [table_uri, column, config_class, config_options, index_name, replace]
+  drop_index:
+    file: drop_index.py.j2
+    title: Drop an index
+    language: python
+    required_context: [table_uri, index_name]
+  optimize:
+    file: optimize.py.j2
+    title: Optimize a table
+    language: python
+    required_context: [table_uri, cleanup_days]
+  cleanup_versions:
+    file: cleanup_versions.py.j2
+    title: Clean up old versions
+    language: python
+    required_context: [table_uri, older_than_days, delete_unverified]
+  restore_version:
+    file: restore_version.py.j2
+    title: Restore a table version
+    language: python
+    required_context: [table_uri, version]
+  drop_table:
+    file: drop_table.py.j2
+    title: Drop a table
+    language: python
+    required_context: [table_uri]
