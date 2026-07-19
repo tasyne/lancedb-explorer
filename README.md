@@ -56,6 +56,70 @@ The hard-coded Faker locale aliases live in
 `src/lance_explorer/demo_data.py` as `FAKER_LOCALE_ALIASES`. Alias examples include
 `usa`, `spanish`, `chinese`, `japanese`, `french`, `german`, `india`, and `brazil`.
 
+## Mirror documentation for offline viewing
+
+The Docs page looks for two zip files that each unzip to a static-site root with
+`index.html` at the zip root. Create them on an internet-connected machine, then
+copy them into `docs_mirrors/`.
+
+macOS/Linux:
+
+```bash
+mkdir -p docs_mirrors/_work/lancedb-docs docs_mirrors/_work/lancedb-python-api
+
+wget --mirror --page-requisites --convert-links --adjust-extension --no-parent \
+  --no-host-directories --restrict-file-names=windows --cut-dirs=0 \
+  --directory-prefix=docs_mirrors/_work/lancedb-docs \
+  https://docs.lancedb.com/
+
+(cd docs_mirrors/_work/lancedb-docs && zip -qr ../../lancedb-docs.zip .)
+
+wget --mirror --page-requisites --convert-links --adjust-extension --no-parent \
+  --no-host-directories --restrict-file-names=windows --cut-dirs=3 \
+  --directory-prefix=docs_mirrors/_work/lancedb-python-api \
+  https://lancedb.github.io/lancedb/python/python/
+
+(cd docs_mirrors/_work/lancedb-python-api && zip -qr ../../lancedb-python-api.zip .)
+```
+
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Path docs_mirrors\_work\lancedb-docs, docs_mirrors\_work\lancedb-python-api -Force
+
+wget.exe --mirror --page-requisites --convert-links --adjust-extension --no-parent `
+    --no-host-directories --restrict-file-names=windows --cut-dirs=0 `
+    --directory-prefix=docs_mirrors\_work\lancedb-docs `
+    https://docs.lancedb.com/
+
+Compress-Archive -Path docs_mirrors\_work\lancedb-docs\* -DestinationPath docs_mirrors\lancedb-docs.zip -Force
+
+wget.exe --mirror --page-requisites --convert-links --adjust-extension --no-parent `
+    --no-host-directories --restrict-file-names=windows --cut-dirs=3 `
+    --directory-prefix=docs_mirrors\_work\lancedb-python-api `
+    https://lancedb.github.io/lancedb/python/python/
+
+Compress-Archive -Path docs_mirrors\_work\lancedb-python-api\* -DestinationPath docs_mirrors\lancedb-python-api.zip -Force
+```
+
+The same commands are saved as convenience scripts:
+
+```powershell
+.\scripts\mirror_docs.ps1
+```
+
+```bash
+./scripts/mirror_docs.sh
+```
+
+The commands require GNU `wget`. The shell version also requires `zip`. The
+archives must be named:
+
+- `docs_mirrors/lancedb-docs.zip`
+- `docs_mirrors/lancedb-python-api.zip`
+
+Set `LANCE_EXPLORER_DOCS_MIRROR_DIR` to make the app look in a different folder.
+
 ## Runtime environment variables
 
 Credentials are resolved from the runtime environment by LanceDB and `s3fs`. Generated code never includes their values.

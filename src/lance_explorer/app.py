@@ -9,7 +9,7 @@ import streamlit as st
 from lance_explorer.config import AppConfig
 from lance_explorer.paths import split_table_uri
 from lance_explorer.ui.help_text import LANCE_OVERVIEW, LANCE_STRENGTHS
-from lance_explorer.ui.pages import compare, explorer, indexes, maintenance, query, table
+from lance_explorer.ui.pages import compare, docs, explorer, indexes, maintenance, query, table
 from lance_explorer.ui.state import initialize_state, select_table
 
 
@@ -35,6 +35,10 @@ def indexes_page() -> None:
 
 def maintenance_page() -> None:
     maintenance.render(AppConfig.from_env())
+
+
+def docs_page() -> None:
+    docs.render()
 
 
 def _short_table_label(table_uri: str) -> str:
@@ -153,6 +157,7 @@ def main() -> None:
         st.Page(compare_page, title="Compare", icon="⚖️"),
         st.Page(indexes_page, title="Indexes", icon="🧭"),
         st.Page(maintenance_page, title="Maintenance", icon="🛠️"),
+        st.Page(docs_page, title="Docs", icon="📚"),
     ]
     st.navigation(pages).run()
 
