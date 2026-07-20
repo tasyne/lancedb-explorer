@@ -57,6 +57,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def run(argv: Sequence[str] | None = None) -> int:
+    """Run the CLI: create demo data or launch Streamlit with passthrough args."""
+
     parser = _build_parser()
     args, streamlit_args = parser.parse_known_args(argv)
 
@@ -89,4 +91,6 @@ def run(argv: Sequence[str] | None = None) -> int:
 
 
 def main() -> None:
+    """Console-script entry point."""
+
     raise SystemExit(run())

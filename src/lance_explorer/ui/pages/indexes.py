@@ -32,6 +32,8 @@ def _show_status_once() -> None:
 
 
 def render(config: AppConfig) -> None:
+    """Render index inspection, creation, and removal workflows."""
+
     st.title("Indexes")
     _show_status_once()
     table_uri = table_uri_control(key="index-table-open")

@@ -8,6 +8,8 @@ import pyarrow as pa
 
 @dataclass(frozen=True, slots=True)
 class FieldSnapshot:
+    """Flattened view of an Arrow field at a schema path."""
+
     path: str
     type: str
     nullable: bool
@@ -17,6 +19,8 @@ class FieldSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class FieldChange:
+    """Single schema difference between two flattened Arrow schemas."""
+
     path: str
     change: str
     left: Any
@@ -51,6 +55,8 @@ def _children(field: pa.Field) -> list[pa.Field]:
 
 
 def flatten_schema(schema: pa.Schema) -> list[FieldSnapshot]:
+    """Flatten nested Arrow fields so schema versions can be compared by path."""
+
     snapshots: list[FieldSnapshot] = []
 
     def visit(field: pa.Field, prefix: str, ordinal: int) -> None:
@@ -73,10 +79,14 @@ def flatten_schema(schema: pa.Schema) -> list[FieldSnapshot]:
 
 
 def schema_to_rows(schema: pa.Schema) -> list[dict[str, Any]]:
+    """Return flattened schema rows suitable for Streamlit tables and JSON output."""
+
     return [asdict(field) for field in flatten_schema(schema)]
 
 
 def diff_schemas(left: pa.Schema, right: pa.Schema) -> list[FieldChange]:
+    """Return field-level and schema-metadata differences between two schemas."""
+
     left_fields = {field.path: field for field in flatten_schema(left)}
     right_fields = {field.path: field for field in flatten_schema(right)}
     changes: list[FieldChange] = []

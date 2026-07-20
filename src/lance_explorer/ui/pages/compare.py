@@ -12,6 +12,8 @@ from lance_explorer.ui.help_text import help_text
 
 
 def render(config: AppConfig) -> None:
+    """Render metadata and bounded row comparison workflows."""
+
     st.title("Compare tables")
     repository = LanceRepository(config.max_query_rows)
 

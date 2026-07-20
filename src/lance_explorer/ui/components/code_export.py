@@ -12,6 +12,8 @@ from lance_explorer.ui.help_text import help_text
 
 @st.cache_resource(show_spinner=False)
 def get_template_renderer(template_directory: str | None = None) -> TemplateRenderer:
+    """Return the cached renderer for the configured template directory."""
+
     return TemplateRenderer(template_directory)
 
 
@@ -22,6 +24,8 @@ def render_code(
     template_directory: str | None,
     template_fingerprint: str,
 ) -> str:
+    """Render code with cache invalidation tied to template fingerprints."""
+
     del template_fingerprint
     renderer = get_template_renderer(template_directory)
     return renderer.render(template_id, json.loads(context_json))
@@ -34,6 +38,8 @@ def show_code_export(
     template_directory: str | None = None,
     label: str | None = None,
 ) -> None:
+    """Render a labeled code-export expander with copy support."""
+
     renderer = get_template_renderer(template_directory)
     spec = renderer.registry.get(template_id)
     expander_label = label or f"Code export: {spec.title}"

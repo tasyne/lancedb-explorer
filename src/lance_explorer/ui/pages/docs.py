@@ -33,6 +33,8 @@ def _docs_index_for(root: str, modified_ns: int) -> list[DocsIndexEntry]:
 
 
 def render() -> None:
+    """Render offline documentation mirrors with an `llms.txt`-derived index."""
+
     st.title("Docs")
     st.info(
         "If navigation links inside the mirrored documentation do not work, use the "

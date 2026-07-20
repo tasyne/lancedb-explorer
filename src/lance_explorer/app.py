@@ -14,30 +14,44 @@ from lance_explorer.ui.state import initialize_state, select_table
 
 
 def explorer_page() -> None:
+    """Render the storage/table explorer page."""
+
     explorer.render(AppConfig.from_env())
 
 
 def table_page() -> None:
+    """Render table metadata, schema, version, and preview tools."""
+
     table.render(AppConfig.from_env())
 
 
 def query_page() -> None:
+    """Render bounded filter, FTS, and raw-vector query tools."""
+
     query.render(AppConfig.from_env())
 
 
 def compare_page() -> None:
+    """Render table metadata and bounded row comparison tools."""
+
     compare.render(AppConfig.from_env())
 
 
 def indexes_page() -> None:
+    """Render non-vector index inspection and management tools."""
+
     indexes.render(AppConfig.from_env())
 
 
 def maintenance_page() -> None:
+    """Render table optimization, cleanup, restore, and drop tools."""
+
     maintenance.render(AppConfig.from_env())
 
 
 def docs_page() -> None:
+    """Render offline documentation mirrors and the local docs index."""
+
     docs.render()
 
 
@@ -138,6 +152,8 @@ def _render_table_selection_sidebar() -> None:
 
 
 def main() -> None:
+    """Initialize shared Streamlit state and run multipage navigation."""
+
     st.set_option("client.toolbarMode", "viewer")
     st.set_page_config(page_title="Lance Explorer", page_icon="🗂️", layout="wide")
     config = AppConfig.from_env()

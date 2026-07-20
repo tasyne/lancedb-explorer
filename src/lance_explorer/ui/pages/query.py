@@ -21,6 +21,8 @@ def _display_query_result(result: QueryResult | None) -> None:
 
 
 def render(config: AppConfig) -> None:
+    """Render bounded filter, full-text, and raw-vector query workflows."""
+
     st.title("Query workbench")
     table_uri = table_uri_control(key="query-table-open")
     if not table_uri:

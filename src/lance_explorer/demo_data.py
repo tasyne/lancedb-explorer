@@ -82,6 +82,8 @@ _BIO_TERMS = [
 
 @dataclass(frozen=True, slots=True)
 class DemoTableResult:
+    """Summary of a generated demo Lance table."""
+
     table_uri: str
     database_uri: str
     table_name: str
@@ -91,6 +93,8 @@ class DemoTableResult:
 
 
 def resolve_faker_locale(value: str) -> str:
+    """Resolve a friendly Faker locale alias or pass through a locale code."""
+
     key = value.strip()
     if not key:
         raise ValueError("Faker locale cannot be empty")
@@ -104,6 +108,8 @@ def demo_rows(
     seed: int | None = None,
     include_publicity_risk: bool = False,
 ) -> list[dict[str, Any]]:
+    """Generate fictional PII-style movie-star rows for demos."""
+
     if row_count < 1:
         raise ValueError("Demo row count must be at least 1")
 
@@ -181,6 +187,8 @@ def create_demo_table(
     version_count: int = 3,
     overwrite: bool = False,
 ) -> DemoTableResult:
+    """Create a demo Lance table with multiple versions for diff workflows."""
+
     if version_count < 2:
         raise ValueError("Demo version count must be at least 2")
     if version_count - 1 > row_count:
@@ -213,6 +221,7 @@ def create_demo_table(
         data=data,
         mode="overwrite" if overwrite else "create",
     )
+    # Adding this field as a second write creates an explicit schema change for demos.
     table.add_columns(DEMO_VERSIONED_FIELD)
 
     offset = first_chunk_size

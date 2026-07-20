@@ -42,6 +42,8 @@ def _version_metadata(versions: list[dict[str, object]], version: int) -> dict[s
 
 
 def render(config: AppConfig) -> None:
+    """Render table optimization, version cleanup, restore, and drop workflows."""
+
     st.title("Maintenance")
     _show_status_once()
     table_uri = table_uri_control(key="maintenance-table-open")

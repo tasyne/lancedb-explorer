@@ -7,6 +7,8 @@ from lance_explorer.paths import normalize_uri, parent_uri
 
 
 def initialize_state(config: AppConfig) -> None:
+    """Populate Streamlit session defaults without overwriting existing state."""
+
     defaults = {
         "current_uri": normalize_uri(config.home_uri),
         "selected_table_uri": "",
@@ -24,6 +26,8 @@ def initialize_state(config: AppConfig) -> None:
 
 
 def navigate(uri: str, *, add_history: bool = True) -> None:
+    """Move Explorer to a URI and optionally append browser-style history."""
+
     normalized = normalize_uri(uri)
     st.session_state.current_uri = normalized
     if not add_history:
@@ -39,6 +43,8 @@ def navigate(uri: str, *, add_history: bool = True) -> None:
 
 
 def navigate_back() -> bool:
+    """Move Explorer back in history when possible."""
+
     index = int(st.session_state.navigation_index)
     if index <= 0:
         return False
@@ -49,6 +55,8 @@ def navigate_back() -> bool:
 
 
 def navigate_forward() -> bool:
+    """Move Explorer forward in history when possible."""
+
     index = int(st.session_state.navigation_index)
     history = st.session_state.navigation_history
     if index >= len(history) - 1:
@@ -60,10 +68,14 @@ def navigate_forward() -> bool:
 
 
 def navigate_up() -> None:
+    """Navigate Explorer to the current URI's parent."""
+
     navigate(parent_uri(st.session_state.current_uri))
 
 
 def select_table(uri: str) -> None:
+    """Select a table, clear stale table outputs, and maintain deduped history."""
+
     normalized = normalize_uri(uri)
     if st.session_state.get("selected_table_uri") != normalized:
         st.session_state.query_results = {}
@@ -79,10 +91,14 @@ def select_table(uri: str) -> None:
 
 
 def generation_for(resource_uri: str) -> int:
+    """Return the current cache generation for a URI."""
+
     return int(st.session_state.cache_generations.get(resource_uri, 0))
 
 
 def bump_generation(resource_uri: str) -> int:
+    """Increment the cache generation for a URI after refresh or mutation."""
+
     generations = dict(st.session_state.cache_generations)
     generations[resource_uri] = int(generations.get(resource_uri, 0)) + 1
     st.session_state.cache_generations = generations

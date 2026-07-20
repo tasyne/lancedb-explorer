@@ -12,6 +12,8 @@ from lance_explorer.ui.state import select_table
 
 
 def table_uri_control(*, key: str = "table_uri_control") -> str:
+    """Render the shared selected-table input and return the active table URI."""
+
     current = st.session_state.get("selected_table_uri", "")
     value_key = f"{key}-value"
     sync_key = f"{key}-synced"
@@ -36,6 +38,8 @@ def table_uri_control(*, key: str = "table_uri_control") -> str:
 
 
 def display_result(result: Any) -> None:
+    """Display action/query output with special handling for empty LanceDB results."""
+
     if result is None:
         return
     if isinstance(result, pd.DataFrame):
@@ -51,10 +55,14 @@ def display_result(result: Any) -> None:
 
 
 def template_directory(config: AppConfig) -> str | None:
+    """Return the configured code-template override directory, if any."""
+
     return str(config.template_override_dir) if config.template_override_dir else None
 
 
 def parse_version(value: str) -> int | None:
+    """Parse an optional positive version number from UI text input."""
+
     stripped = value.strip()
     if not stripped:
         return None
@@ -65,4 +73,6 @@ def parse_version(value: str) -> int | None:
 
 
 def parse_columns(value: str) -> list[str]:
+    """Parse a comma-separated column list from UI text input."""
+
     return [item.strip() for item in value.split(",") if item.strip()]

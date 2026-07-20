@@ -10,6 +10,8 @@ _LLMS_ENTRY_RE = re.compile(r"^- \[([^\]]+)]\(([^)]+)\)(?::\s*(.*))?$")
 
 @dataclass(frozen=True, slots=True)
 class DocsIndexEntry:
+    """One link parsed from an offline docs `llms.txt` index."""
+
     llms_section: str
     title: str
     url: str
@@ -19,6 +21,8 @@ class DocsIndexEntry:
 
 
 def parse_llms_index(text: str) -> list[DocsIndexEntry]:
+    """Parse Mintlify-style `llms.txt` links while preserving section headings."""
+
     section = "Docs"
     entries: list[DocsIndexEntry] = []
 
@@ -49,6 +53,8 @@ def parse_llms_index(text: str) -> list[DocsIndexEntry]:
 
 
 def load_llms_index(root: Path) -> list[DocsIndexEntry]:
+    """Load `llms.txt` from an extracted docs mirror, if present."""
+
     llms_path = root / "llms.txt"
     if not llms_path.exists():
         return []
@@ -56,6 +62,8 @@ def load_llms_index(root: Path) -> list[DocsIndexEntry]:
 
 
 def markdown_path_from_url(url: str) -> str | None:
+    """Return a local markdown path for docs links, ignoring non-markdown assets."""
+
     parsed = urlparse(url)
     path = unquote(parsed.path).lstrip("/")
     if not path.endswith(".md"):
@@ -64,6 +72,8 @@ def markdown_path_from_url(url: str) -> str | None:
 
 
 def group_path_for_markdown_path(markdown_path: str | None) -> tuple[str, ...]:
+    """Infer a display group from a markdown path when `llms.txt` is flat."""
+
     if not markdown_path:
         return ()
 
@@ -75,6 +85,8 @@ def group_path_for_markdown_path(markdown_path: str | None) -> tuple[str, ...]:
 
 
 def local_markdown_path(root: Path, markdown_path: str) -> Path:
+    """Resolve an index markdown path under an extracted mirror root."""
+
     return root.joinpath(*PurePosixPath(markdown_path).parts)
 
 

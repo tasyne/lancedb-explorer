@@ -14,6 +14,8 @@ from threading import Thread
 
 @dataclass(frozen=True, slots=True)
 class DocsMirrorSpec:
+    """Static documentation mirror expected by the Docs page."""
+
     slug: str
     title: str
     zip_name: str
@@ -22,6 +24,8 @@ class DocsMirrorSpec:
 
 @dataclass(frozen=True, slots=True)
 class DocsServer:
+    """Local HTTP server for an extracted documentation mirror."""
+
     base_url: str
     root: Path
     server: ThreadingHTTPServer
@@ -45,7 +49,11 @@ DOCS_MIRRORS = [
 
 
 class QuietStaticHandler(SimpleHTTPRequestHandler):
+    """Static handler tuned for wget-mirrored Mintlify assets."""
+
     def guess_type(self, path: str) -> str:
+        """Return browser-safe MIME types for query-string-like mirrored filenames."""
+
         if ".js@" in path:
             return "application/javascript"
         if ".css@" in path:
@@ -53,19 +61,27 @@ class QuietStaticHandler(SimpleHTTPRequestHandler):
         return super().guess_type(path)
 
     def log_message(self, format: str, *args: object) -> None:
+        """Suppress per-request logging from the embedded docs server."""
+
         return
 
 
 def docs_mirror_dir() -> Path:
+    """Return the directory where offline docs zip files are expected."""
+
     configured = os.getenv("LANCE_EXPLORER_DOCS_MIRROR_DIR")
     return Path(configured).expanduser() if configured else Path.cwd() / "docs_mirrors"
 
 
 def expected_zip_path(spec: DocsMirrorSpec) -> Path:
+    """Return the expected zip path for a docs mirror spec."""
+
     return docs_mirror_dir() / spec.zip_name
 
 
 def extract_docs_zip(zip_path: Path, slug: str) -> Path:
+    """Safely extract a docs zip into a content-addressed temp directory."""
+
     digest = _file_digest(zip_path)
     target = Path(tempfile.gettempdir()) / "lance_explorer_docs" / slug / digest
     index_path = target / "index.html"
@@ -76,6 +92,7 @@ def extract_docs_zip(zip_path: Path, slug: str) -> Path:
     with zipfile.ZipFile(zip_path) as archive:
         for member in archive.infolist():
             destination = target / member.filename
+            # The zip files are user-provided, so guard against path traversal.
             if not _is_relative_to(destination.resolve(), target.resolve()):
                 raise ValueError(f"Unsafe path in docs archive: {member.filename}")
         archive.extractall(target)
@@ -86,6 +103,8 @@ def extract_docs_zip(zip_path: Path, slug: str) -> Path:
 
 
 def start_docs_server(root: Path) -> DocsServer:
+    """Start a loopback-only static server for an extracted mirror."""
+
     port = _free_port()
     handler = partial(QuietStaticHandler, directory=str(root))
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)

@@ -11,6 +11,8 @@ from lance_explorer.config import upath_storage_options_from_env
 
 @dataclass(frozen=True, slots=True)
 class PathEntry:
+    """Directory-listing item used by the Explorer page."""
+
     uri: str
     name: str
     is_dir: bool
@@ -20,17 +22,23 @@ class PathEntry:
 
 @dataclass(frozen=True, slots=True)
 class TableLocation:
+    """A full `.lance` table URI split into database URI and table name."""
+
     table_uri: str
     database_uri: str
     table_name: str
 
 
 def has_uri_scheme(value: str) -> bool:
+    """Return whether a value looks like an absolute URI instead of a local path."""
+
     parsed = urlparse(value)
     return bool(parsed.scheme and len(parsed.scheme) > 1)
 
 
 def normalize_uri(value: str) -> str:
+    """Normalize user-entered local paths and preserve explicit URI schemes."""
+
     value = value.strip()
     if not value:
         raise ValueError("URI cannot be empty")
@@ -40,15 +48,21 @@ def normalize_uri(value: str) -> str:
 
 
 def make_upath(uri: str) -> UPath:
+    """Create a UPath with any runtime storage options needed for the URI."""
+
     normalized = normalize_uri(uri)
     return UPath(normalized, **upath_storage_options_from_env(normalized))
 
 
 def is_lance_table_path(path: UPath | str) -> bool:
+    """Return whether a path names a Lance table directory by `.lance` suffix."""
+
     return str(path).rstrip("/").lower().endswith(".lance")
 
 
 def split_table_uri(table_uri: str) -> TableLocation:
+    """Validate and split a full Lance table URI into database and table parts."""
+
     normalized = normalize_uri(table_uri)
     if not is_lance_table_path(normalized):
         raise ValueError("A full Lance table URI must end with '.lance'")
@@ -65,14 +79,20 @@ def split_table_uri(table_uri: str) -> TableLocation:
 
 
 def parent_uri(uri: str) -> str:
+    """Return the parent URI using the same path semantics as Explorer navigation."""
+
     return str(make_upath(uri).parent)
 
 
 def join_uri(parent: str, child: str) -> str:
+    """Join a child name to a parent URI using UPath semantics."""
+
     return str(make_upath(parent) / child)
 
 
 def list_children(uri: str) -> list[PathEntry]:
+    """List child paths for local or supported remote storage."""
+
     path = make_upath(uri)
     entries: list[PathEntry] = []
     for child in path.iterdir():

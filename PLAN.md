@@ -1,346 +1,161 @@
-# Lance Explorer — Reference Plan and Implemented MVP
+# Lance Explorer Strategic Plan
 
-**Status:** Implemented and locally validated MVP  
-**Target runtime:** Python 3.12  
-**Validated libraries:** LanceDB 0.34.0, Streamlit 1.59.2, Universal Pathlib 0.3.10, s3fs 2026.6.0, PyArrow 21.0.0
+**Status:** Implemented MVP with focused local validation.  
+**Runtime target:** Python 3.12 through 3.13.  
+**Primary stack:** Streamlit, LanceDB, PyArrow, pandas, Universal Pathlib, s3fs, Jinja, Faker.
 
-## 1. Objective
+## Purpose
 
-Build a local-first Streamlit application for navigating LanceDB storage, inspecting and comparing tables, running bounded queries, managing non-vector indexes, and performing table maintenance.
+Lance Explorer is a local-first Streamlit application for inspecting and operating on LanceDB tables without building a full administration platform. It is intended for developers, field engineers, and demo environments that need a practical way to browse storage, select `.lance` tables, inspect metadata, run bounded queries, compare versions/tables, manage non-vector indexes, perform maintenance, and view offline documentation.
 
-The application is deliberately lightweight:
+The app is deliberately lightweight:
 
-- no authentication or role system;
+- no authentication or role model;
 - no audit database;
-- no background queue;
+- no background worker queue;
 - no embedded credential store;
-- no model downloads, embedding generation, or rerankers;
-- no automatic full-table comparison;
-- no operation is repeated merely because Streamlit reruns a page.
+- no model download, embedding generation, or reranking pipeline;
+- no unbounded query, preview, or comparison workflow;
+- no mutation triggered merely by Streamlit rerendering.
 
-Local filesystems and S3-compatible object stores are first-class. The app is suitable for an air-gapped network when its Python wheels are staged internally.
-
-## 2. Implemented capabilities
+## Current Capabilities
 
 ### Explorer
 
-- URI-bar navigation for local and `s3://` paths.
-- Back, forward, parent, home, and refresh controls.
-- Child path listing with Lance table detection.
-- Explicit probing of a URI as a LanceDB database.
-- Selection of a table from a complete `.lance` URI.
-- Code export for connection and open-table setup.
+- Navigate local paths and S3-style URIs with back, forward, up, home, and refresh controls.
+- Detect `.lance` table directories and prioritize them in directory listings.
+- Hide non-Lance files by default while keeping folders visible.
+- Select tables directly from clickable table names.
+- Maintain a deduped selected-table history with copy controls.
 
-### Table inspection
+### Table
 
-- Current URI, row count, version, fragment count, and index count.
-- Flattened Arrow schema, including nested fields and field metadata.
-- Raw Arrow schema display.
-- Table statistics and index statistics.
-- Version history.
-- Schema comparison between two versions.
-- Explicitly loaded, bounded row preview.
+- Show row count, table version, schema, schema metadata, statistics, index information, and versions.
+- Preview bounded rows on explicit request.
+- Compare schemas between versions with auto-filled first/latest defaults.
+- Export labeled code snippets for common table-open operations.
 
-### Query workbench
+### Query
 
-- SQL-style filter expression with projection and hard row limit.
-- Full-text search against a selected string column.
-- Optional query-plan output.
-- Raw pasted-vector search against a list-like column; no embedding generation.
-- Results execute only on form submission and remain in session state across harmless reruns.
-- Code export for each query form.
+- Run bounded SQL-style filters with optional projection and plan output.
+- Run bounded FTS queries against string columns.
+- Run bounded raw-vector queries against list-like vector columns.
+- Keep results in session state after explicit submission only.
 
-### Table comparison
+### Compare
 
-- Two complete `.lance` URI inputs.
-- Optional version selection for metadata/schema comparison.
-- Row-count, schema, index, and table-statistics comparison.
-- Bounded positional sample comparison.
-- Bounded unique-key comparison showing left-only, right-only, and changed values.
-- Code export for the selected comparison.
+- Compare two full `.lance` table URIs, optionally at selected versions.
+- Compare metadata, schema, indexes, statistics, bounded positional samples, and bounded key-based samples.
+- Avoid claiming whole-table equality from bounded samples.
 
-### Index management
+### Indexes
 
-- Existing index definitions and statistics.
-- Runtime discovery of index configuration classes in the installed LanceDB SDK.
-- Arrow-type-aware choices for:
-  - `BTree`;
-  - `Bitmap`;
-  - `LabelList`;
-  - `Fm`, when present;
-  - `FTS`.
-- Create, replace, and drop indexes through explicit forms.
-- Vector-index creation is intentionally omitted from this version.
-- Code export for create/drop operations.
+- Discover supported non-vector index classes from the installed LanceDB SDK.
+- Offer compatible B-tree, bitmap, label-list, FM, and FTS options based on Arrow field type.
+- Create, replace, and drop indexes with confirmation and post-mutation refresh.
+- Keep vector-index creation out of scope for this MVP.
 
 ### Maintenance
 
-- Optimize a table.
-- Optimize while pruning versions older than a selected retention period.
-- Optional deletion of unverified files with an explicit warning and typed confirmation.
-- Restore a prior version.
-- Drop a table with table-name confirmation.
-- Code export for all maintenance operations.
+- Optimize tables.
+- Prune old versions through LanceDB optimization options.
+- Restore a selected version after showing nearby version metadata.
+- Drop tables with typed confirmation.
+- Present empty LanceDB mutation responses as successful no-detail results.
 
-### In-app guidance
+### Docs
 
-- Native Streamlit info tooltips on non-obvious fields, metrics, queries, and actions.
-- A compact sidebar explanation of Lance and the workloads it handles well.
-- A registry-driven index guide describing each installed non-vector index type.
-- Succinct warnings for version cleanup, restoration, index removal, and table deletion.
-- Help text is centralized and tested so page copy remains consistent and brief.
+- Serve offline documentation zip mirrors from a loopback-only static server.
+- Build a grouped offline index from `llms.txt` when present.
+- Open selected index entries in the mirrored HTML iframe.
+- Keep the mirror process intentionally simple: `wget --mirror` plus zip.
 
-LanceDB's unified `Table.optimize(...)` method is used instead of the deprecated compact-only and cleanup-only methods. It performs compaction, version pruning when requested, and index maintenance without introducing the separate `pylance` dependency.
+### Demo Data
 
-## 3. Architecture
+- `lance-explorer --create-demo-data` creates fictional PII-style movie-star data.
+- Faker locale aliases support quick localized demos.
+- Multiple Lance versions are created by default so schema/history/diff features have data to demonstrate.
 
-```text
-Streamlit application
-├── app.py                     Multipage navigation and shared initialization
-├── ui/
-│   ├── pages/                 Explorer, Table, Query, Compare, Indexes, Maintenance
-│   ├── components/            Table selector and code-export/copy component
-│   ├── help_text.py            Centralized tooltips and Lance feature guidance
-│   ├── cache.py               Short-lived read caches
-│   └── state.py               Navigation, selection, generations, submitted results
-├── repository.py              LanceDB API boundary
-├── paths.py                   UPath navigation and table URI decomposition
-├── schema_diff.py             Nested Arrow schema flattening and comparison
-├── comparison.py              Bounded metadata and row comparison
-├── index_registry.py          Programmatic index discovery and compatibility
-├── codegen/
-│   └── renderer.py            Manifest-driven, strict Jinja renderer
-└── templates/python/          External code templates
-```
-
-The repository owns LanceDB calls. Domain modules own path parsing, schema comparison, row comparison, and index compatibility. Page modules coordinate inputs and presentation rather than embedding storage logic. Help copy is centralized in `ui/help_text.py` and index-specific guidance is read from `index_registry.py`, preventing duplicated or contradictory explanations.
-
-Fresh LanceDB table handles are opened for each repository operation. This avoids sharing checked-out versions or mutable table state through Streamlit's resource cache.
-
-## 4. Path and storage model
-
-Use `upath.UPath` as the common Pathlib-style abstraction:
-
-```python
-from upath import UPath
-
-path = UPath("s3://bucket/database")
-child = path / "events.lance"
-parent = path.parent
-```
-
-Rules:
-
-1. Bare local paths are expanded and converted to absolute paths.
-2. URI schemes are preserved.
-3. `UPath` handles joining, parent navigation, names, and child iteration for local and S3 paths.
-4. Values are converted to `str` only at LanceDB boundaries or for display.
-5. A complete table URI must end in `.lance`.
-6. Its parent URI is treated as the LanceDB database URI, and its filename stem is the table name.
-
-For S3 navigation, `UPath` receives `s3fs` options derived at runtime from standard AWS environment variables. LanceDB receives only non-secret storage options such as endpoint, region, and `allow_http`; credentials remain in the normal provider chain.
-
-Supported environment variables:
-
-```bash
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-AWS_SESSION_TOKEN=
-AWS_REGION=us-east-1
-AWS_ENDPOINT=http://localhost:9000
-ALLOW_HTTP=true
-```
-
-`ALLOW_HTTP=true` is intended for a controlled local S3-compatible endpoint such as MinIO. Generic HTTP directory navigation is not assumed.
-
-## 5. Caching and rerun safety
-
-### Core rule
-
-> Cache bounded read snapshots; never cache mutations; execute queries, comparisons, and actions only from explicit form submissions.
-
-### Read caches
-
-| Data | Streamlit mechanism | TTL | Max entries |
-|---|---|---:|---:|
-| Local child listing | `st.cache_data` | 5 seconds | 256 |
-| S3 child listing | `st.cache_data` | 15 seconds | 256 |
-| Database table names | `st.cache_data` | 15 seconds | 256 |
-| Table snapshot | `st.cache_data` | 20 seconds | 512 |
-| Version list | `st.cache_data` | 20 seconds | 512 |
-| Version schema | `st.cache_data` | 20 seconds | 512 |
-| Rendered code | `st.cache_data` | content-hash keyed | 512 |
-| Template renderer | `st.cache_resource` | process lifetime | by template directory |
-
-Query and comparison output is not placed in a global pickle cache. It is retained in `st.session_state` only after submission.
-
-### Generation invalidation
-
-A per-resource integer generation is included in metadata and directory cache keys. Refreshing or mutating a table increments the relevant generation without clearing every unrelated cache.
-
-After a mutation, the app also clears displayed query, comparison, preview, and schema-diff results so stale output is not presented as current.
-
-### Form behavior
-
-- Query, comparison, index, and maintenance calls are inside `st.form` blocks.
-- Rendering, tab changes, code-copy clicks, and navigation reruns do not repeat the submitted operation.
-- Re-submitting the form is considered an intentional rerun.
-- Service-layer limits cap results even if widget values are manipulated.
-
-## 6. Query design
-
-The filter workbench is intentionally not a general SQL console. It exposes:
-
-- projection;
-- a Lance SQL-style filter expression;
-- row limit;
-- optional execution plan.
-
-FTS exposes:
-
-- query text;
-- applicable string column;
-- optional metadata filter;
-- projection and limit.
-
-Raw-vector search exposes:
-
-- finite numeric JSON array;
-- selected list-like vector column;
-- optional filter;
-- projection and limit.
-
-No model or embedding code is loaded by the application.
-
-## 7. Comparison design
-
-### Metadata comparison
-
-For each table/version, collect:
-
-- row count;
-- current/resolved version;
-- schema and schema metadata;
-- table/fragment statistics;
-- index definitions and statistics.
-
-Nested schema comparison reports:
-
-- added and removed fields;
-- type changes;
-- nullability changes;
-- field metadata changes;
-- order changes;
-- schema metadata changes.
-
-### Bounded row comparison
-
-Without a key, compare bounded results positionally. With a key:
-
-1. include the key plus selected columns;
-2. reject missing or duplicate keys within the bounded result;
-3. report keys found on only one side;
-4. report changed values by key and column.
-
-The MVP does not claim that a bounded comparison proves complete table equality. A future large-scale exact comparison should use partitioned hashes or Lance-native execution rather than loading unrestricted tables into pandas.
-
-## 8. Index registry
-
-Index choices are not hardcoded into page logic. `index_registry.py` declares metadata and dynamically checks whether each class exists in `lancedb.index`.
-
-Compatibility rules are based on Arrow types:
-
-- `BTree`: scalar equality/range-compatible types;
-- `Bitmap`: low-cardinality scalar types;
-- `LabelList`: list-like types;
-- `Fm`: string types;
-- `FTS`: string types.
-
-Each entry owns:
-
-- stable key;
-- LanceDB class name;
-- UI label and succinct use-case description shown in the index guide;
-- compatibility predicate;
-- configuration constructor.
-
-Adding a supported index generally requires one registry entry and, only when specialized options are needed, a small UI configuration block.
-
-## 9. Code export
-
-Code templates are stored outside Python source:
+## Architecture
 
 ```text
-src/lance_explorer/templates/python/
-├── manifest.yaml
-├── _connection.py.j2
-├── connect.py.j2
-├── open_table.py.j2
-├── filter_query.py.j2
-├── fts_query.py.j2
-├── vector_query.py.j2
-├── compare_tables.py.j2
-├── create_index.py.j2
-├── drop_index.py.j2
-├── optimize.py.j2
-├── cleanup_versions.py.j2
-├── restore_version.py.j2
-└── drop_table.py.j2
+src/lance_explorer/
+  app.py                    Streamlit navigation and shared sidebar state
+  cli.py                    Console entry point and demo-data mode
+  config.py                 Environment-derived app/storage configuration
+  paths.py                  Local/S3 URI normalization and table URI parsing
+  repository.py             LanceDB API boundary and query/mutation limits
+  comparison.py             Bounded metadata and row comparison
+  schema_diff.py            Arrow schema flattening and diffing
+  index_registry.py         Non-vector index discovery and compatibility
+  demo_data.py              Faker-backed demo table generation
+  docs_index.py             llms.txt parsing and grouping
+  docs_server.py            Safe zip extraction and loopback static serving
+  codegen/renderer.py       Strict Jinja code-export rendering
+  ui/
+    cache.py                Short-lived read caches keyed by generations
+    state.py                Navigation, table selection, and cache generations
+    components/             Shared UI controls and code export
+    pages/                  Explorer, Table, Query, Compare, Indexes, Maintenance, Docs
+  templates/python/         Packaged code-export templates
 ```
 
-`manifest.yaml` maps operation IDs to template files, titles, languages, and required context fields. Jinja uses `StrictUndefined` so missing values fail visibly instead of yielding incomplete code.
+The repository layer owns LanceDB calls. Pages coordinate inputs and presentation. Domain modules own path parsing, schema comparison, row comparison, index compatibility, docs indexing, and code rendering. This keeps storage behavior testable outside Streamlit.
 
-Runtime template override:
+Fresh LanceDB table handles are opened per repository operation. This prevents checked-out versions or mutable table state from leaking through Streamlit's resource cache.
 
-```bash
-LANCE_EXPLORER_TEMPLATE_DIR=/opt/lance-explorer/templates
-```
+## Storage and Configuration Strategy
 
-Resolution order:
+- Treat complete table URIs ending in `.lance` as the user-facing selection unit.
+- Treat the table URI parent as the LanceDB database URI and the filename stem as the table name.
+- Use `UPath` for path navigation so local and S3-style storage share one mental model.
+- Pass non-secret endpoint/region/HTTP options explicitly to LanceDB.
+- Let LanceDB and `s3fs` resolve credentials from the normal provider chain.
+- Keep generated code free of secret-bearing values.
 
-1. override directory;
-2. packaged templates.
+## Caching and Rerun Safety
 
-Generated snippets:
+Core rule: cache bounded read snapshots; never cache mutations.
 
-- use `UPath` for local/S3 paths;
-- use syntax highlighting through `st.code`;
-- provide a local clipboard button through inline Streamlit HTML/JavaScript;
-- never include credential values;
-- reference endpoint/region/HTTP environment variables when relevant.
+- Directory listings, table names, snapshots, versions, and schema rows have short TTLs.
+- Per-resource generation counters invalidate targeted caches after refreshes or mutations.
+- Query, comparison, preview, and mutation outputs are kept in session state, not global pickle caches.
+- Mutating actions require explicit UI confirmation; deletes require typed name confirmation.
+- Post-mutation paths refresh relevant metadata and clear stale displayed results.
 
-The code-render cache includes the template source hash, so modifying an override template invalidates its prior rendered snippet.
+## Code Export Strategy
 
-## 10. Error handling and destructive operations
+- Templates are outside Python source under `src/lance_explorer/templates/python/`.
+- `manifest.yaml` declares template IDs, titles, files, languages, and required context keys.
+- Jinja runs with `StrictUndefined` so missing context fails visibly.
+- Runtime overrides use `LANCE_EXPLORER_TEMPLATE_DIR`.
+- Template source hashes participate in the render cache key.
+- Context keys that look secret-bearing are rejected before rendering.
 
-- Backend exceptions are rendered as concise page errors.
-- Query limits are enforced in `LanceRepository`.
-- Vector input must be a non-empty finite numeric JSON list.
-- Full table scans are never initiated automatically.
-- Cleanup, restore, and table deletion require typed confirmation.
-- `delete_unverified=True` is exposed only alongside LanceDB's concurrency/corruption warning.
-- Index changes require explicit form submission.
-- Dropping an index removes it from table metadata; a later optimize operation handles unreferenced storage and index maintenance.
+## Offline Documentation Strategy
 
-## 11. Focused tests
+The docs mirror contract is intentionally minimal:
 
-The test suite deliberately targets high-risk behavior instead of maximizing line coverage.
+- `docs_mirrors/lancedb-docs.zip`
+- `docs_mirrors/lancedb-python-api.zip`
+- each archive unpacks to a static root with `index.html` at the zip root.
 
-Implemented tests cover:
+The app extracts zips to content-addressed temp directories, rejects unsafe archive paths, and serves the result on `127.0.0.1`. If `llms.txt` is available, it becomes a reliable left-side index even when the mirrored site's JavaScript navigation is incomplete.
 
-- local and S3-style URI parsing;
-- Pathlib-style local child navigation;
-- complete `.lance` URI decomposition;
-- nested Arrow schema differences;
-- numeric-vector validation and hard query limits;
-- code-template rendering, override precedence, and secret-key rejection;
-- local table inspection, filtering, and version listing;
-- B-tree index creation/removal;
-- FTS index creation and search;
-- bounded keyed table comparison;
-- default Streamlit page smoke rendering;
-- required help coverage for important operations;
-- succinct Lance overview and index guidance constraints.
+## Validation Strategy
+
+Tests focus on behavior with high regression risk:
+
+- URI normalization and `.lance` table splitting;
+- schema flattening and diffing;
+- query limit and vector parsing;
+- repository integration against local Lance tables;
+- FTS and B-tree index workflows;
+- bounded table comparison;
+- code-template rendering and override behavior;
+- demo-data generation and CLI routing;
+- docs zip extraction, MIME handling, and `llms.txt` indexing;
+- Streamlit smoke rendering.
 
 Validation commands:
 
@@ -349,64 +164,15 @@ ruff check .
 pytest
 ```
 
-Current result: **24 tests passing** and **Ruff clean**.
+## Deferred Work
 
-## 12. Air-gapped deployment
+Prioritize only when the workflows justify the complexity:
 
-The application performs no required outbound web calls and uses no CDN assets. For deployment:
-
-1. Build wheels on a connected machine matching the target OS and architecture.
-2. Transfer the wheelhouse through the approved process.
-3. Install with `--no-index` on the isolated network.
-4. Configure local filesystem or internal S3-compatible endpoints through environment variables.
-
-A helper script is included:
-
-```bash
-./scripts/build_wheelhouse.sh wheelhouse
-```
-
-Offline installation pattern:
-
-```bash
-python3.12 -m pip install --no-index --find-links wheelhouse lance-explorer
-```
-
-The package targets Python 3.12. Local validation in the build environment also succeeded under Python 3.13, but Python 3.12 remains the intended deployment runtime.
-
-## 13. Running the app
-
-```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -e '.[dev]'
-streamlit run src/lance_explorer/app.py
-```
-
-Or after installation:
-
-```bash
-lance-explorer
-```
-
-## 14. Deferred enhancements
-
-These are intentionally outside the MVP:
-
-- branch/tag management;
+- branch and tag management;
 - vector-index creation and tuning;
-- exact distributed comparison of very large tables;
-- pagination for extremely large table collections;
-- background job execution;
+- exact large-table comparison using partitioned hashes or Lance-native execution;
+- stronger pagination for very large table collections;
+- background jobs for long-running mutations;
 - authentication, permissions, and audit history;
-- embedding/model management.
-
-## 15. Technical references
-
-Verified July 18, 2026:
-
-- LanceDB Python SDK: <https://lancedb.github.io/lancedb/python/python/>
-- LanceDB storage configuration: <https://docs.lancedb.com/storage/configuration>
-- Streamlit caching: <https://docs.streamlit.io/develop/concepts/architecture/caching>
-- Streamlit navigation: <https://docs.streamlit.io/develop/api-reference/navigation/st.navigation>
-- Universal Pathlib: <https://universal-pathlib.readthedocs.io/en/latest/>
+- richer offline docs search beyond the `llms.txt` index;
+- optional generated documentation bundles when simple mirroring is insufficient.

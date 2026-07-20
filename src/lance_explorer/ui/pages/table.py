@@ -38,6 +38,8 @@ def _sync_schema_diff_defaults(table_uri: str, version_numbers: list[int]) -> No
 
 
 def render(config: AppConfig) -> None:
+    """Render selected-table metadata, versions, schema diff, and preview."""
+
     st.title("Table")
     table_uri = table_uri_control(key="table-open-form")
     if not table_uri:

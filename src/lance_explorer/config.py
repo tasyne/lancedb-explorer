@@ -9,6 +9,8 @@ _TRUE_VALUES = {"1", "true", "yes", "on"}
 
 @dataclass(frozen=True, slots=True)
 class AppConfig:
+    """Runtime settings that are safe to derive from environment variables."""
+
     home_uri: str
     template_override_dir: Path | None
     max_query_rows: int = 10_000
@@ -19,6 +21,8 @@ class AppConfig:
 
     @classmethod
     def from_env(cls) -> AppConfig:
+        """Build app configuration from non-secret environment variables."""
+
         override = os.getenv("LANCE_EXPLORER_TEMPLATE_DIR")
         return cls(
             home_uri=os.getenv("LANCE_EXPLORER_HOME_URI", str(Path.home())),
@@ -29,10 +33,7 @@ class AppConfig:
 
 
 def lancedb_storage_options_from_env() -> dict[str, str]:
-    """Return non-secret LanceDB storage options.
-
-    Credentials are intentionally left to the normal AWS environment/provider chain.
-    """
+    """Return non-secret LanceDB storage options."""
 
     mapping = {
         "endpoint": os.getenv("AWS_ENDPOINT") or os.getenv("AWS_ENDPOINT_URL"),

@@ -18,6 +18,8 @@ def compare_metadata(
     left_version: int | None = None,
     right_version: int | None = None,
 ) -> dict[str, Any]:
+    """Compare table metadata and schemas for two table/version selections."""
+
     left = repository.snapshot(left_uri, version=left_version)
     right = repository.snapshot(right_uri, version=right_version)
     schema_changes = [
@@ -56,6 +58,8 @@ def compare_rows(
     left_version: int | None = None,
     right_version: int | None = None,
 ) -> dict[str, pd.DataFrame | int | str]:
+    """Compare bounded row samples positionally or by a unique key."""
+
     selected = list(dict.fromkeys(([key] if key else []) + columns))
     left = repository.preview(left_uri, columns=selected or None, limit=limit, version=left_version)
     right = repository.preview(

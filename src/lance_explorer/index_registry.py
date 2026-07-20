@@ -39,6 +39,8 @@ def _list(data_type: pa.DataType) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class IndexDefinition:
+    """UI and construction metadata for one LanceDB non-vector index type."""
+
     key: str
     class_name: str
     label: str
@@ -47,10 +49,14 @@ class IndexDefinition:
     template: str = "create_index"
 
     def available(self) -> bool:
+        """Return whether the installed LanceDB SDK exposes this index class."""
+
         module = import_module("lancedb.index")
         return hasattr(module, self.class_name)
 
     def create_config(self, **kwargs: Any) -> Any:
+        """Instantiate the LanceDB index configuration for this definition."""
+
         module = import_module("lancedb.index")
         index_class = getattr(module, self.class_name)
         return index_class(**kwargs)
@@ -96,10 +102,14 @@ INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
 
 
 def available_index_definitions() -> list[IndexDefinition]:
+    """Return registry entries supported by the installed LanceDB SDK."""
+
     return [definition for definition in INDEX_DEFINITIONS if definition.available()]
 
 
 def compatible_index_definitions(data_type: pa.DataType) -> list[IndexDefinition]:
+    """Return available index definitions compatible with an Arrow data type."""
+
     return [
         definition
         for definition in available_index_definitions()
@@ -108,6 +118,8 @@ def compatible_index_definitions(data_type: pa.DataType) -> list[IndexDefinition
 
 
 def get_index_definition(key: str) -> IndexDefinition:
+    """Return an available index definition by stable registry key."""
+
     for definition in available_index_definitions():
         if definition.key == key:
             return definition

@@ -129,6 +129,8 @@ def _inject_explorer_styles() -> None:
 
 
 def render(config: AppConfig) -> None:
+    """Render URI navigation and table selection for local/S3 storage."""
+
     st.title("Explorer")
     _inject_explorer_styles()
 

@@ -18,6 +18,8 @@ from lance_explorer.schema_diff import schema_to_rows
 
 @dataclass(frozen=True, slots=True)
 class QueryResult:
+    """Rows returned by a query plus an optional LanceDB execution plan."""
+
     rows: pd.DataFrame
     plan: str | None = None
 
@@ -110,11 +112,15 @@ class LanceRepository:
         )
 
     def open_table(self, table_uri: str, version: int | None = None):
+        """Open a Lance table, optionally checked out at a specific version."""
+
         location = split_table_uri(table_uri)
         db = self._connect(location.database_uri)
         return db.open_table(location.table_name, version=version)
 
     def list_tables(self, database_uri: str) -> list[str]:
+        """List table names in a LanceDB database URI with a bounded page loop."""
+
         db = self._connect(database_uri)
         names: list[str] = []
         page_token: str | None = None
@@ -127,17 +133,25 @@ class LanceRepository:
         return names
 
     def table_exists(self, table_uri: str) -> bool:
+        """Return whether a full `.lance` URI is present in its parent database."""
+
         location = split_table_uri(table_uri)
         return location.table_name in self.list_tables(location.database_uri)
 
     def get_schema(self, table_uri: str, version: int | None = None) -> pa.Schema:
+        """Return the Arrow schema for a table or version."""
+
         return self.open_table(table_uri, version=version).schema
 
     def list_versions(self, table_uri: str) -> list[dict[str, Any]]:
+        """Return LanceDB version metadata as JSON-safe dictionaries."""
+
         table = self.open_table(table_uri)
         return [_json_safe(item) for item in table.list_versions()]
 
     def list_indexes(self, table_uri: str, version: int | None = None) -> list[dict[str, Any]]:
+        """Return index definitions and available statistics for a table."""
+
         table = self.open_table(table_uri, version=version)
         output: list[dict[str, Any]] = []
         for config in table.list_indices():
@@ -153,6 +167,8 @@ class LanceRepository:
         return output
 
     def snapshot(self, table_uri: str, version: int | None = None) -> dict[str, Any]:
+        """Collect bounded metadata used by the Table and Compare pages."""
+
         table = self.open_table(table_uri, version=version)
         stats = table.stats()
         return {
@@ -176,6 +192,8 @@ class LanceRepository:
         limit: int = 100,
         version: int | None = None,
     ) -> pd.DataFrame:
+        """Return a bounded row preview through the same limit guard as queries."""
+
         return self.run_filter(
             table_uri,
             where=None,
@@ -195,6 +213,8 @@ class LanceRepository:
         version: int | None = None,
         include_plan: bool = False,
     ) -> QueryResult:
+        """Run a bounded SQL-style filter/projection query."""
+
         limit = self._validated_limit(limit)
         table = self.open_table(table_uri, version=version)
         query = table.search()
@@ -218,6 +238,8 @@ class LanceRepository:
         version: int | None = None,
         include_plan: bool = False,
     ) -> QueryResult:
+        """Run a bounded full-text search against a selected string column."""
+
         if not text.strip():
             raise ValueError("Full-text query cannot be empty")
         limit = self._validated_limit(limit)
@@ -243,6 +265,8 @@ class LanceRepository:
         version: int | None = None,
         include_plan: bool = False,
     ) -> QueryResult:
+        """Run a bounded raw-vector search without generating embeddings."""
+
         if not vector or not all(
             isinstance(item, int | float) and math.isfinite(item) for item in vector
         ):
@@ -268,6 +292,8 @@ class LanceRepository:
         replace: bool = False,
         config_options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Create a non-vector index using registry-owned configuration."""
+
         definition = get_index_definition(index_type)
         config = definition.create_config(**(config_options or {}))
         table = self.open_table(table_uri)
@@ -275,11 +301,15 @@ class LanceRepository:
         return {"status": "created", "column": column, "index_type": index_type, "name": name}
 
     def drop_index(self, table_uri: str, name: str) -> dict[str, Any]:
+        """Drop an index by name from a Lance table."""
+
         table = self.open_table(table_uri)
         table.drop_index(name)
         return {"status": "dropped", "name": name}
 
     def optimize(self, table_uri: str, cleanup_days: int | None = None) -> dict[str, Any]:
+        """Run LanceDB optimization, optionally pruning older versions."""
+
         table = self.open_table(table_uri)
         cleanup = timedelta(days=cleanup_days) if cleanup_days is not None else None
         return _public_object_dict(table.optimize(cleanup_older_than=cleanup))
@@ -291,6 +321,8 @@ class LanceRepository:
         older_than_days: int,
         delete_unverified: bool = False,
     ) -> dict[str, Any]:
+        """Optimize while pruning versions older than the requested retention window."""
+
         if older_than_days < 0:
             raise ValueError("Retention age cannot be negative")
         table = self.open_table(table_uri)
@@ -301,11 +333,15 @@ class LanceRepository:
         return _public_object_dict(result)
 
     def restore_version(self, table_uri: str, version: int) -> dict[str, Any]:
+        """Restore a table to a prior LanceDB version."""
+
         table = self.open_table(table_uri)
         result = table.restore(version)
         return {"status": "restored", "version": version, "result": _public_object_dict(result)}
 
     def drop_table(self, table_uri: str) -> dict[str, Any]:
+        """Drop a Lance table from its parent database."""
+
         location: TableLocation = split_table_uri(table_uri)
         db = self._connect(location.database_uri)
         db.drop_table(location.table_name)
@@ -318,6 +354,8 @@ class LanceRepository:
 
 
 def parse_vector(value: str) -> list[float]:
+    """Parse user-entered JSON into a finite numeric vector."""
+
     try:
         parsed = json.loads(value)
     except json.JSONDecodeError as exc:
