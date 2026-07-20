@@ -120,6 +120,8 @@ export LANCE_EXPLORER_DOCS_MIRROR_DIR="/path/to/docs_mirrors"
 
 ## Validate
 
+Run the test suite from the project root after installing the dev dependencies:
+
 ```bash
 ruff check .
 pytest
