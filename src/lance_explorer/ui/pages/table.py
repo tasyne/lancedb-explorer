@@ -11,6 +11,7 @@ from lance_explorer.schema_diff import diff_schemas
 from lance_explorer.ui.cache import cached_snapshot, cached_versions
 from lance_explorer.ui.components.code_export import show_code_export
 from lance_explorer.ui.components.common import parse_version, table_uri_control, template_directory
+from lance_explorer.ui.components.dataframe import show_dataframe, vector_display_columns
 from lance_explorer.ui.help_text import help_text
 from lance_explorer.ui.state import generation_for
 
@@ -60,6 +61,7 @@ def render(config: AppConfig) -> None:
         st.warning(f"Unable to load table versions: {exc}")
     version_numbers = _version_numbers(versions, snapshot["version"])
     _sync_schema_diff_defaults(table_uri, version_numbers)
+    display_vector_columns = vector_display_columns(snapshot)
 
     metrics = st.columns(4)
     metrics[0].metric("Rows", snapshot["row_count"], help=help_text("rows"))
@@ -71,18 +73,36 @@ def render(config: AppConfig) -> None:
     )
     metrics[3].metric("Indices", len(snapshot.get("indexes", [])), help=help_text("indexes"))
 
-    tabs = st.tabs(["Schema", "Statistics", "Versions", "Schema changes", "Indexes", "Sample"])
-    with tabs[0]:
+    sample_tab, schema_tab, versions_tab, schema_changes_tab, indexes_tab, statistics_tab = st.tabs(
+        ["Sample", "Schema", "Versions", "Schema changes", "Indexes", "Statistics"]
+    )
+    with sample_tab:
+        st.caption("Bounded data preview", help=help_text("sample"))
+        fields = [row["path"] for row in snapshot["schema"] if "." not in row["path"]]
+        with st.form("table-preview"):
+            columns = st.multiselect("Columns", fields, default=fields)
+            limit = st.number_input(
+                "Row limit", 1, config.max_query_rows, config.default_query_rows
+            )
+            load = st.form_submit_button("Load sample")
+        if load:
+            try:
+                st.session_state["table_preview"] = LanceRepository(config.max_query_rows).preview(
+                    table_uri, columns=columns or None, limit=int(limit)
+                )
+            except Exception as exc:
+                st.error(str(exc))
+        preview = st.session_state.get("table_preview")
+        if preview is not None:
+            show_dataframe(preview, vector_columns=display_vector_columns)
+    with schema_tab:
         st.caption("Arrow schema", help=help_text("schema"))
         st.dataframe(pd.DataFrame(snapshot["schema"]), width="stretch")
         st.code(snapshot["schema_string"], language="text")
-    with tabs[1]:
-        st.caption("Physical layout", help=help_text("statistics"))
-        st.json(statistics)
-    with tabs[2]:
+    with versions_tab:
         st.caption("Table history", help=help_text("versions"))
         st.dataframe(pd.DataFrame(versions), width="stretch")
-    with tabs[3]:
+    with schema_changes_tab:
         st.caption("Historical schema comparison", help=help_text("schema_changes"))
         with st.form("version-schema-diff"):
             left_text = st.text_input("Left version", key="schema-left-version")
@@ -106,29 +126,13 @@ def render(config: AppConfig) -> None:
         changes = st.session_state.get("table_schema_diff")
         if changes is not None:
             st.dataframe(pd.DataFrame(changes), width="stretch")
-    with tabs[4]:
+    with indexes_tab:
         st.caption("Secondary indexes", help=help_text("indexes"))
         indexes = snapshot.get("indexes", [])
         st.dataframe(pd.DataFrame(indexes), width="stretch")
-    with tabs[5]:
-        st.caption("Bounded data preview", help=help_text("sample"))
-        fields = [row["path"] for row in snapshot["schema"] if "." not in row["path"]]
-        with st.form("table-preview"):
-            columns = st.multiselect("Columns", fields, default=fields[: min(8, len(fields))])
-            limit = st.number_input(
-                "Row limit", 1, config.max_query_rows, config.default_query_rows
-            )
-            load = st.form_submit_button("Load sample")
-        if load:
-            try:
-                st.session_state["table_preview"] = LanceRepository(config.max_query_rows).preview(
-                    table_uri, columns=columns or None, limit=int(limit)
-                )
-            except Exception as exc:
-                st.error(str(exc))
-        preview = st.session_state.get("table_preview")
-        if preview is not None:
-            st.dataframe(preview, width="stretch")
+    with statistics_tab:
+        st.caption("Physical layout", help=help_text("statistics"))
+        st.json(statistics)
 
     code_version_options: list[int | None] = [None, *reversed(version_numbers)]
     code_version = st.selectbox(

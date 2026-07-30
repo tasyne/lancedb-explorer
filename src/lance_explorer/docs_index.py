@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlparse
 
-_LLMS_ENTRY_RE = re.compile(r"^- \[([^\]]+)]\(([^)]+)\)(?::\s*(.*))?$")
+_LLMS_ENTRY_RE = re.compile(r"^[*-]\s+\[([^\]]+)]\(([^)]+)\)(?::\s*(.*))?$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,8 +28,9 @@ def parse_llms_index(text: str) -> list[DocsIndexEntry]:
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
-        if line.startswith("## "):
-            section = line.removeprefix("## ").strip()
+        heading = _markdown_heading(line)
+        if heading:
+            section = heading
             continue
 
         match = _LLMS_ENTRY_RE.match(line)
@@ -53,12 +54,37 @@ def parse_llms_index(text: str) -> list[DocsIndexEntry]:
 
 
 def load_llms_index(root: Path) -> list[DocsIndexEntry]:
-    """Load `llms.txt` from an extracted docs mirror, if present."""
+    """Load `llms.txt` and merge in any mirrored markdown pages it omitted."""
 
     llms_path = root / "llms.txt"
-    if not llms_path.exists():
-        return []
-    return parse_llms_index(llms_path.read_text(encoding="utf-8"))
+    entries = (
+        parse_llms_index(llms_path.read_text(encoding="utf-8", errors="replace"))
+        if llms_path.exists()
+        else []
+    )
+    return _merge_entries(entries, discover_markdown_entries(root))
+
+
+def discover_markdown_entries(root: Path) -> list[DocsIndexEntry]:
+    """Discover local markdown files so the docs index survives partial `llms.txt` data."""
+
+    entries: list[DocsIndexEntry] = []
+    for path in sorted(root.rglob("*.md")):
+        if not path.is_file():
+            continue
+        markdown_path = path.relative_to(root).as_posix()
+        group_path = group_path_for_markdown_path(markdown_path)
+        entries.append(
+            DocsIndexEntry(
+                llms_section=group_path[0] if group_path else "Docs",
+                title=_title_for_markdown_path(markdown_path),
+                url=markdown_path,
+                description="",
+                markdown_path=markdown_path,
+                group_path=group_path,
+            )
+        )
+    return entries
 
 
 def markdown_path_from_url(url: str) -> str | None:
@@ -87,7 +113,49 @@ def group_path_for_markdown_path(markdown_path: str | None) -> tuple[str, ...]:
 def local_markdown_path(root: Path, markdown_path: str) -> Path:
     """Resolve an index markdown path under an extracted mirror root."""
 
-    return root.joinpath(*PurePosixPath(markdown_path).parts)
+    path = root.joinpath(*PurePosixPath(markdown_path).parts)
+    if path.exists():
+        return path
+
+    current = root
+    for part in PurePosixPath(markdown_path).parts:
+        if not current.exists() or not current.is_dir():
+            return path
+        matches = [child for child in current.iterdir() if child.name.casefold() == part.casefold()]
+        if not matches:
+            return path
+        current = matches[0]
+    return current
+
+
+def _markdown_heading(line: str) -> str | None:
+    if not line.startswith("#"):
+        return None
+    marker, _, title = line.partition(" ")
+    if not marker or any(character != "#" for character in marker):
+        return None
+    title = title.strip()
+    return title or None
+
+
+def _merge_entries(
+    primary: list[DocsIndexEntry],
+    fallback: list[DocsIndexEntry],
+) -> list[DocsIndexEntry]:
+    output = list(primary)
+    known_paths = {entry.markdown_path for entry in output if entry.markdown_path}
+    for entry in fallback:
+        if entry.markdown_path and entry.markdown_path not in known_paths:
+            output.append(entry)
+            known_paths.add(entry.markdown_path)
+    return output
+
+
+def _title_for_markdown_path(markdown_path: str) -> str:
+    path = PurePosixPath(markdown_path)
+    if path.name == "index.md" and path.parent.parts:
+        return _humanize_path_part(path.parent.parts[-1])
+    return _humanize_path_part(path.stem)
 
 
 def _humanize_path_part(part: str) -> str:

@@ -124,6 +124,18 @@ def _render_indexed_website(
 
     nav_column, content_column = st.columns([0.28, 0.72], gap="large")
     with nav_column:
+        st.markdown(
+            """
+            <style>
+            div[data-testid="stButton"] button[kind="primary"] {
+                background-color: #dc2626;
+                border-color: #dc2626;
+                color: white;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         st.subheader("Offline Index")
         query = st.text_input("Filter pages", placeholder="Search titles, paths, descriptions")
         filtered_entries = _filter_entries(entries, query)
@@ -159,9 +171,9 @@ def _render_index_buttons(
             for entry in group_entries:
                 if not entry.markdown_path:
                     continue
-                label = entry.title
+                label = _entry_button_label(entry)
                 if entry.markdown_path == selected_path:
-                    label = f"-> {label}"
+                    label = f">> {label}"
                 if st.button(
                     label,
                     key=f"docs-nav-{docs_slug}-{entry.markdown_path}",
@@ -221,7 +233,7 @@ def _filter_entries(entries: list[DocsIndexEntry], query: str) -> list[DocsIndex
 def _group_entries(entries: list[DocsIndexEntry]) -> dict[str, list[DocsIndexEntry]]:
     grouped: dict[str, list[DocsIndexEntry]] = {}
     for entry in entries:
-        label = " / ".join(entry.group_path) if entry.group_path else entry.llms_section
+        label = entry.group_path[0] if entry.group_path else entry.llms_section
         grouped.setdefault(label, []).append(entry)
     return grouped
 
@@ -229,6 +241,12 @@ def _group_entries(entries: list[DocsIndexEntry]) -> dict[str, list[DocsIndexEnt
 def _entry_location(docs_title: str, entry: DocsIndexEntry) -> str:
     group = " / ".join(entry.group_path) if entry.group_path else entry.llms_section
     return f"{docs_title} / {group} / {entry.title}"
+
+
+def _entry_button_label(entry: DocsIndexEntry) -> str:
+    if len(entry.group_path) <= 1:
+        return entry.title
+    return " / ".join([*entry.group_path[1:], entry.title])
 
 
 def _mirrored_html_url(static_base_url: str, markdown_path: str) -> str:

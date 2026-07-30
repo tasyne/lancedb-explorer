@@ -2,14 +2,17 @@
 import pandas as pd
 
 
-def open_table(table_uri: str):
+def open_table(table_uri: str, version: int | None = None):
     path = UPath(table_uri)
     db = lancedb.connect(str(path.parent), storage_options=storage_options or None)
-    return db.open_table(path.name.removesuffix(".lance"))
+    table = db.open_table(path.name.removesuffix(".lance"))
+    if version is not None:
+        table.checkout(version)
+    return table
 
 
-left = open_table({{ left_uri | pyrepr }})
-right = open_table({{ right_uri | pyrepr }})
+left = open_table({{ left_uri | pyrepr }}, {{ left_version | default(none) | pyrepr }})
+right = open_table({{ right_uri | pyrepr }}, {{ right_version | default(none) | pyrepr }})
 
 columns = {{ columns | pyrepr }}
 limit = {{ limit }}

@@ -9,9 +9,11 @@ from typing import Any
 import lancedb
 import pandas as pd
 import pyarrow as pa
+from lancedb.rerankers import RRFReranker
 
 from lance_explorer.config import lancedb_storage_options_from_env
-from lance_explorer.index_registry import get_index_definition
+from lance_explorer.index_registry import fts_uses_packaged_jieba, get_index_definition
+from lance_explorer.language_models import ensure_packaged_language_model_home
 from lance_explorer.paths import TableLocation, split_table_uri
 from lance_explorer.schema_diff import schema_to_rows
 
@@ -94,6 +96,35 @@ def _index_columns(config: Any) -> list[str]:
     )
 
 
+def _columns_with_scores(
+    columns: list[str] | None,
+    score_columns: tuple[str, ...],
+) -> list[str] | None:
+    if columns is None:
+        return None
+    output = list(columns)
+    for column in score_columns:
+        if column not in output:
+            output.append(column)
+    return output
+
+
+def _trim_query_result(
+    rows: pd.DataFrame,
+    columns: list[str] | None,
+    score_columns: tuple[str, ...],
+) -> pd.DataFrame:
+    if columns is None:
+        return rows
+    output_columns = list(columns)
+    output_columns.extend(
+        column
+        for column in score_columns
+        if column in rows.columns and column not in output_columns
+    )
+    return rows.loc[:, [column for column in output_columns if column in rows.columns]]
+
+
 class LanceRepository:
     """Thin synchronous LanceDB adapter.
 
@@ -116,7 +147,12 @@ class LanceRepository:
 
         location = split_table_uri(table_uri)
         db = self._connect(location.database_uri)
-        return db.open_table(location.table_name, version=version)
+        table = db.open_table(location.table_name)
+        if version is not None:
+            # `open_table(version=...)` exists in newer LanceDB releases, but `checkout`
+            # has been the stable time-travel path across more SDK versions.
+            table.checkout(version)
+        return table
 
     def list_tables(self, database_uri: str) -> list[str]:
         """List table names in a LanceDB database URI with a bounded page loop."""
@@ -247,11 +283,10 @@ class LanceRepository:
         query = table.search(text.strip(), query_type="fts", fts_columns=column)
         if where and where.strip():
             query = query.where(where.strip())
-        if columns:
-            query = query.select(columns)
         query = query.limit(limit)
         plan = query.explain_plan(True) if include_plan else None
-        return QueryResult(rows=query.to_pandas(), plan=plan)
+        rows = query.to_pandas()
+        return QueryResult(rows=_trim_query_result(rows, columns, ("_score",)), plan=plan)
 
     def run_vector(
         self,
@@ -277,10 +312,57 @@ class LanceRepository:
         if where and where.strip():
             query = query.where(where.strip())
         if columns:
-            query = query.select(columns)
+            query = query.select(_columns_with_scores(columns, ("_distance",)))
         query = query.limit(limit)
         plan = query.explain_plan(True) if include_plan else None
-        return QueryResult(rows=query.to_pandas(), plan=plan)
+        rows = query.to_pandas()
+        return QueryResult(rows=_trim_query_result(rows, columns, ("_distance",)), plan=plan)
+
+    def run_hybrid(
+        self,
+        table_uri: str,
+        *,
+        text: str,
+        vector: list[float],
+        vector_column: str,
+        fts_column: str,
+        where: str | None,
+        columns: list[str] | None,
+        limit: int,
+        rerank: bool = True,
+        version: int | None = None,
+        include_plan: bool = False,
+    ) -> QueryResult:
+        """Run LanceDB hybrid search from separate text and raw-vector inputs."""
+
+        if not text.strip():
+            raise ValueError("Hybrid search text cannot be empty")
+        if not vector or not all(
+            isinstance(item, int | float) and math.isfinite(item) for item in vector
+        ):
+            raise ValueError("Vector must be a non-empty list of finite numbers")
+        limit = self._validated_limit(limit)
+        table = self.open_table(table_uri, version=version)
+        query = (
+            table.search(
+                query_type="hybrid",
+                vector_column_name=vector_column,
+                fts_columns=fts_column,
+            )
+            .vector(vector)
+            .text(text.strip())
+        )
+        if rerank:
+            query = query.rerank(RRFReranker(return_score="all"))
+        if where and where.strip():
+            query = query.where(where.strip())
+        query = query.limit(limit)
+        plan = query.explain_plan(True) if include_plan else None
+        rows = query.to_pandas()
+        return QueryResult(
+            rows=_trim_query_result(rows, columns, ("_score", "_distance", "_relevance_score")),
+            plan=plan,
+        )
 
     def create_index(
         self,
@@ -295,7 +377,10 @@ class LanceRepository:
         """Create a non-vector index using registry-owned configuration."""
 
         definition = get_index_definition(index_type)
-        config = definition.create_config(**(config_options or {}))
+        options = config_options or {}
+        if index_type == "FTS" and fts_uses_packaged_jieba(options):
+            ensure_packaged_language_model_home()
+        config = definition.create_config(**options)
         table = self.open_table(table_uri)
         table.create_index(column, config=config, name=name or None, replace=replace)
         return {"status": "created", "column": column, "index_type": index_type, "name": name}

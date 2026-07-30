@@ -1,6 +1,10 @@
 {% include "open_table.py.j2" %}
+{% if needs_language_model_home %}from lance_explorer.language_models import ensure_packaged_language_model_home
+{% endif %}
 from lancedb.index import {{ config_class }}
 
+{% if needs_language_model_home %}ensure_packaged_language_model_home()
+{% endif %}
 config = {{ config_class }}(**{{ config_options | pyrepr }})
 table.create_index(
     {{ column | pyrepr }},

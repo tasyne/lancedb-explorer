@@ -30,21 +30,27 @@ The app is deliberately lightweight:
 
 ### Table
 
-- Show row count, table version, schema, schema metadata, statistics, index information, and versions.
-- Preview bounded rows on explicit request.
+- Show row count, table version, schema, schema metadata, index information, versions, and statistics.
+- Open with Sample first and Statistics last, matching the highest-frequency workflow.
+- Preview bounded rows on explicit request with all columns selected by default.
+- Render known vector columns as JSON strings in result tables so embeddings are copyable.
 - Compare schemas between versions with auto-filled first/latest defaults.
 - Export labeled code snippets for common table-open operations.
 
 ### Query
 
 - Run bounded SQL-style filters with optional projection and plan output.
-- Run bounded FTS queries against string columns.
+- Run bounded FTS queries against FTS-indexed string columns only.
+- Run bounded hybrid searches with separate raw-vector and FTS text inputs.
 - Run bounded raw-vector queries against list-like vector columns.
+- Preserve score columns such as `_score` and `_distance` when the user selects return columns.
 - Keep results in session state after explicit submission only.
 
 ### Compare
 
 - Compare two full `.lance` table URIs, optionally at selected versions.
+- Pre-fill left/right URIs from the selected table and deduped table history on every page visit.
+- Discover common columns after both bounded-comparison URIs are present.
 - Compare metadata, schema, indexes, statistics, bounded positional samples, and bounded key-based samples.
 - Avoid claiming whole-table equality from bounded samples.
 
@@ -52,6 +58,7 @@ The app is deliberately lightweight:
 
 - Discover supported non-vector index classes from the installed LanceDB SDK.
 - Offer compatible B-tree, bitmap, label-list, FM, and FTS options based on Arrow field type.
+- Offer FTS presets for English, ICU multilingual, and packaged Jieba tokenization.
 - Create, replace, and drop indexes with confirmation and post-mutation refresh.
 - Keep vector-index creation out of scope for this MVP.
 
@@ -67,6 +74,7 @@ The app is deliberately lightweight:
 
 - Serve offline documentation zip mirrors from a loopback-only static server.
 - Build a grouped offline index from `llms.txt` when present.
+- Merge discovered local markdown files into the index so partial `llms.txt` mirrors still expose pages.
 - Open selected index entries in the mirrored HTML iframe.
 - Keep the mirror process intentionally simple: `wget --mirror` plus zip.
 
@@ -74,6 +82,8 @@ The app is deliberately lightweight:
 
 - `lance-explorer --create-demo-data` creates fictional PII-style movie-star data.
 - Faker locale aliases support quick localized demos.
+- Demo rows include a 64-dimensional `embedding` vector, `embedding_vector_idx`, and
+  `bio_multilingual_fts_idx`.
 - Multiple Lance versions are created by default so schema/history/diff features have data to demonstrate.
 
 ## Architecture
@@ -95,7 +105,7 @@ src/lance_explorer/
   ui/
     cache.py                Short-lived read caches keyed by generations
     state.py                Navigation, table selection, and cache generations
-    components/             Shared UI controls and code export
+    components/             Shared UI controls, browser copy, data display, and code export
     pages/                  Explorer, Table, Query, Compare, Indexes, Maintenance, Docs
   templates/python/         Packaged code-export templates
 ```
@@ -103,6 +113,8 @@ src/lance_explorer/
 The repository layer owns LanceDB calls. Pages coordinate inputs and presentation. Domain modules own path parsing, schema comparison, row comparison, index compatibility, docs indexing, and code rendering. This keeps storage behavior testable outside Streamlit.
 
 Fresh LanceDB table handles are opened per repository operation. This prevents checked-out versions or mutable table state from leaking through Streamlit's resource cache.
+
+Browser-specific behavior stays inside UI components. Clipboard support uses a browser-side iframe button and never invokes OS clipboard subprocesses, which keeps Linux and remote Streamlit deployments portable. Display normalization for code and query text disables font ligatures so examples such as `>=` remain visually copyable ASCII.
 
 ## Storage and Configuration Strategy
 
@@ -120,6 +132,7 @@ Core rule: cache bounded read snapshots; never cache mutations.
 - Directory listings, table names, snapshots, versions, and schema rows have short TTLs.
 - Per-resource generation counters invalidate targeted caches after refreshes or mutations.
 - Query, comparison, preview, and mutation outputs are kept in session state, not global pickle caches.
+- Page defaults may rehydrate from selected-table state, but explicit user-edited inputs are not overwritten unless the underlying table selection changes.
 - Mutating actions require explicit UI confirmation; deletes require typed name confirmation.
 - Post-mutation paths refresh relevant metadata and clear stale displayed results.
 
@@ -131,6 +144,7 @@ Core rule: cache bounded read snapshots; never cache mutations.
 - Runtime overrides use `LANCE_EXPLORER_TEMPLATE_DIR`.
 - Template source hashes participate in the render cache key.
 - Context keys that look secret-bearing are rejected before rendering.
+- Streamlit code blocks are labeled and rendered with ligatures disabled so generated SQL/Python remains copy-paste friendly.
 
 ## Offline Documentation Strategy
 
@@ -152,9 +166,11 @@ Tests focus on behavior with high regression risk:
 - repository integration against local Lance tables;
 - FTS and B-tree index workflows;
 - bounded table comparison;
+- Compare-page default URI restoration and common-column discovery;
 - code-template rendering and override behavior;
 - demo-data generation and CLI routing;
 - docs zip extraction, MIME handling, and `llms.txt` indexing;
+- vector-column display serialization for copyable embeddings;
 - Streamlit smoke rendering.
 
 Validation commands:
@@ -169,10 +185,18 @@ pytest
 Prioritize only when the workflows justify the complexity:
 
 - branch and tag management;
-- vector-index creation and tuning;
+- general vector-index creation and tuning outside demo-data generation;
 - exact large-table comparison using partitioned hashes or Lance-native execution;
 - stronger pagination for very large table collections;
 - background jobs for long-running mutations;
 - authentication, permissions, and audit history;
 - richer offline docs search beyond the `llms.txt` index;
 - optional generated documentation bundles when simple mirroring is insufficient.
+
+## Engineering Guardrails
+
+- Keep LanceDB SDK compatibility logic in `repository.py` and `index_registry.py`, not spread across pages.
+- Keep Streamlit pages thin: gather inputs, call domain/repository helpers, and render results.
+- Prefer small shared UI components for repeated browser or dataframe behavior.
+- Use concise docstrings on public functions/classes; reserve comments for SDK quirks, security checks, or rerun-sensitive state handling.
+- Add tests when behavior crosses module boundaries, depends on LanceDB version quirks, or protects copy/paste/demo workflows.

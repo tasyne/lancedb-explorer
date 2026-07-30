@@ -6,5 +6,7 @@ query = table.search(
     fts_columns={{ column | pyrepr }},
 )
 {% if where %}query = query.where({{ where | pyrepr }})
-{% endif %}{% if columns %}query = query.select({{ columns | pyrepr }})
 {% endif %}rows = query.limit({{ limit }}).to_pandas()
+{% if columns %}selected_columns = {{ columns | pyrepr }}
+rows = rows[[column for column in [*selected_columns, "_score"] if column in rows.columns]]
+{% endif %}
