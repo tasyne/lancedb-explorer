@@ -45,7 +45,10 @@ def test_jieba_index_template_configures_packaged_language_models() -> None:
         },
     )
 
-    assert "ensure_packaged_language_model_home" in code
+    assert 'os.environ.setdefault("LANCE_LANGUAGE_MODEL_HOME"' in code
+    assert "$LANCE_LANGUAGE_MODEL_HOME/jieba/default/dict.txt" in code
+    assert "$LANCE_LANGUAGE_MODEL_HOME/jieba/default/idf.txt" in code
+    assert "$LANCE_LANGUAGE_MODEL_HOME/jieba/default/stop_words.txt" in code
     assert "jieba/default" in code
 
 

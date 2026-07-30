@@ -1,9 +1,16 @@
 {% include "open_table.py.j2" %}
-{% if needs_language_model_home %}from lance_explorer.language_models import ensure_packaged_language_model_home
+{% if needs_language_model_home %}from lance_explorer.language_models import packaged_language_model_home
 {% endif %}
 from lancedb.index import {{ config_class }}
 
-{% if needs_language_model_home %}ensure_packaged_language_model_home()
+{% if needs_language_model_home %}# Lance resolves tokenizer data from LANCE_LANGUAGE_MODEL_HOME.
+# For base_tokenizer="jieba/default", that directory should contain:
+#   $LANCE_LANGUAGE_MODEL_HOME/jieba/default/dict.txt
+#   $LANCE_LANGUAGE_MODEL_HOME/jieba/default/idf.txt
+#   $LANCE_LANGUAGE_MODEL_HOME/jieba/default/stop_words.txt
+# Keeping dict.txt.small beside dict.txt is optional but useful for testing/reference.
+os.environ.setdefault("LANCE_LANGUAGE_MODEL_HOME", str(packaged_language_model_home()))
+
 {% endif %}
 config = {{ config_class }}(**{{ config_options | pyrepr }})
 table.create_index(
