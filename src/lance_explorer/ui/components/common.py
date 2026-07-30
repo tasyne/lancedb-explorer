@@ -7,6 +7,7 @@ import streamlit as st
 
 from lance_explorer.config import AppConfig
 from lance_explorer.paths import normalize_uri
+from lance_explorer.ui.components.dataframe import show_dataframe
 from lance_explorer.ui.help_text import help_text
 from lance_explorer.ui.state import select_table
 
@@ -37,13 +38,13 @@ def table_uri_control(*, key: str = "table_uri_control") -> str:
     return st.session_state.get("selected_table_uri", "")
 
 
-def display_result(result: Any) -> None:
+def display_result(result: Any, *, vector_columns: list[str] | set[str] | None = None) -> None:
     """Display action/query output with special handling for empty LanceDB results."""
 
     if result is None:
         return
     if isinstance(result, pd.DataFrame):
-        st.dataframe(result, width="stretch")
+        show_dataframe(result, vector_columns=vector_columns or ())
         return
     if isinstance(result, dict):
         if not result:

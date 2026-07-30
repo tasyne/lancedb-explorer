@@ -7,5 +7,9 @@ query = table.search(
     vector_column_name={{ column | pyrepr }},
 )
 {% if where %}query = query.where({{ where | pyrepr }})
-{% endif %}{% if columns %}query = query.select({{ columns | pyrepr }})
+{% endif %}{% if columns %}selected_columns = {{ columns | pyrepr }}
+projection_columns = list(dict.fromkeys([*selected_columns, "_distance"]))
+query = query.select(projection_columns)
 {% endif %}rows = query.limit({{ limit }}).to_pandas()
+{% if columns %}rows = rows[[column for column in projection_columns if column in rows.columns]]
+{% endif %}

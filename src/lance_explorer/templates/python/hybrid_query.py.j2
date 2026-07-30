@@ -1,0 +1,27 @@
+{% include "open_table.py.j2" %}
+
+from lancedb.rerankers import RRFReranker
+
+vector = {{ vector | pyrepr }}
+query = (
+    table.search(
+        query_type="hybrid",
+        vector_column_name={{ vector_column | pyrepr }},
+        fts_columns={{ fts_column | pyrepr }},
+    )
+    .vector(vector)
+    .text({{ text | pyrepr }})
+)
+{% if rerank %}query = query.rerank(RRFReranker(return_score="all"))
+{% endif %}{% if where %}query = query.where({{ where | pyrepr }})
+{% endif %}rows = query.limit({{ limit }}).to_pandas()
+{% if columns %}selected_columns = {{ columns | pyrepr }}
+score_columns = ["_score", "_distance", "_relevance_score"]
+rows = rows[
+    [
+        column
+        for column in [*selected_columns, *score_columns]
+        if column in rows.columns
+    ]
+]
+{% endif %}

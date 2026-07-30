@@ -58,20 +58,23 @@ HELP: dict[str, str] = {
         "do not repeat the read."
     ),
     "filter_query": (
-        "Applies a Lance SQL-style WHERE expression to a bounded scan. This is not an arbitrary "
-        "SQL console and cannot run DDL or mutations."
+        "SQL WHERE only. Examples: `birth_date >= DATE '1985-04-02'`; `active = true`; "
+        "`award_count BETWEEN 3 AND 10`; `array_has(tags, 'vip')`; `stage_name LIKE 'Ann%'`."
     ),
     "query_plan": (
         "Shows the physical execution plan. Use it to see whether Lance uses an index or performs "
         "a scan."
     ),
     "fts_query": (
-        "BM25-ranked keyword search over an FTS-indexed string column. FTS tokenizes text; it is "
-        "different from raw substring matching."
+        "BM25-ranked keyword search over an FTS-indexed string column. Example: words to search "
+        "across full-text index."
+    ),
+    "hybrid_query": (
+        "Combines raw-vector nearest-neighbor search with FTS text search. RRF reranking is "
+        "model-free and is LanceDB's basic hybrid fusion."
     ),
     "raw_vector": (
-        "Runs nearest-neighbor search using the numeric vector you paste. No embedding model runs "
-        "in this application."
+        "Paste a JSON vector such as [0.1, -0.2, 0.3, 0.5]. No embedding model runs here."
     ),
     "metadata_compare": (
         "Read-only comparison of schemas, row counts, versions, fragment metrics, and index "
@@ -100,6 +103,13 @@ HELP: dict[str, str] = {
     "fts_positions": (
         "Stores token positions so phrase queries can preserve word order. "
         "This increases index size."
+    ),
+    "fts_tokenizer": (
+        "Controls how text becomes search terms. ICU handles mixed-language text; Jieba uses "
+        "packaged Mandarin dictionary files."
+    ),
+    "fts_language": (
+        "Language affects stemming and stop-word removal. It is separate from CJK tokenization."
     ),
     "drop_index": (
         "Removes the index from table metadata. Run Optimize later to reclaim "

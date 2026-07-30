@@ -1,4 +1,4 @@
-from lance_explorer.index_registry import INDEX_DEFINITIONS
+from lance_explorer.index_registry import FTS_PRESETS, INDEX_DEFINITIONS, fts_options_for_preset
 from lance_explorer.ui.help_text import HELP, LANCE_OVERVIEW, LANCE_STRENGTHS, help_text
 
 
@@ -12,6 +12,9 @@ def test_important_operations_have_succinct_help() -> None:
         "indexes",
         "filter_query",
         "fts_query",
+        "hybrid_query",
+        "fts_language",
+        "fts_tokenizer",
         "raw_vector",
         "metadata_compare",
         "bounded_compare",
@@ -45,3 +48,10 @@ def test_every_registered_index_has_user_facing_guidance() -> None:
     assert all(definition.label for definition in definitions.values())
     assert all("Best for" in definition.description for definition in definitions.values())
     assert all(len(definition.description) <= 100 for definition in definitions.values())
+
+
+def test_fts_presets_cover_common_tokenizers() -> None:
+    assert {"ENGLISH", "MULTILINGUAL", "JIEBA"} <= FTS_PRESETS.keys()
+    assert fts_options_for_preset("ENGLISH")["language"] == "English"
+    assert fts_options_for_preset("MULTILINGUAL")["base_tokenizer"] == "icu"
+    assert fts_options_for_preset("JIEBA")["base_tokenizer"] == "jieba/default"

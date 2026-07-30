@@ -6,7 +6,12 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from lance_explorer.demo_data import FAKER_LOCALE_ALIASES, create_demo_table
+from lance_explorer.demo_data import (
+    DEMO_FTS_INDEX_NAME,
+    DEMO_VECTOR_INDEX_NAME,
+    FAKER_LOCALE_ALIASES,
+    create_demo_table,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -80,7 +85,9 @@ def run(argv: Sequence[str] | None = None) -> int:
         print(
             "Created demo Lance table "
             f"{result.table_uri} with {result.row_count} rows across "
-            f"{result.version_count} versions using Faker locale {result.locale}."
+            f"{result.version_count} versions using Faker locale {result.locale}. "
+            f"Created indexes {DEMO_VECTOR_INDEX_NAME} on embedding and "
+            f"{DEMO_FTS_INDEX_NAME} on bio."
         )
         return 0
 

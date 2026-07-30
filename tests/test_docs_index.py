@@ -1,5 +1,8 @@
 from lance_explorer.docs_index import (
+    discover_markdown_entries,
     group_path_for_markdown_path,
+    load_llms_index,
+    local_markdown_path,
     markdown_path_from_url,
     parse_llms_index,
 )
@@ -44,3 +47,39 @@ def test_group_path_for_markdown_path_humanizes_path_parts() -> None:
         "Table",
     )
 
+
+def test_load_llms_index_discovers_markdown_not_listed_in_llms(tmp_path) -> None:
+    (tmp_path / "llms.txt").write_text(
+        "# Docs\n\n## Docs\n\n- [Home](https://docs.lancedb.com/index.md)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "index.md").write_text("# Home\n", encoding="utf-8")
+    (tmp_path / "datasets").mkdir()
+    (tmp_path / "datasets" / "index.md").write_text("# Datasets\n", encoding="utf-8")
+    (tmp_path / "enterprise").mkdir()
+    (tmp_path / "enterprise" / "auth.md").write_text("# Auth\n", encoding="utf-8")
+
+    entries = load_llms_index(tmp_path)
+    paths = {entry.markdown_path for entry in entries}
+
+    assert {"index.md", "datasets/index.md", "enterprise/auth.md"} <= paths
+    assert any(entry.group_path == ("Datasets",) for entry in entries)
+    assert any(entry.group_path == ("Enterprise",) for entry in entries)
+
+
+def test_discover_markdown_entries_uses_path_titles(tmp_path) -> None:
+    (tmp_path / "embedding").mkdir()
+    (tmp_path / "embedding" / "index.md").write_text("# Embedding\n", encoding="utf-8")
+
+    entries = discover_markdown_entries(tmp_path)
+
+    assert entries[0].title == "Embedding"
+    assert entries[0].group_path == ("Embedding",)
+
+
+def test_local_markdown_path_resolves_case_insensitively(tmp_path) -> None:
+    (tmp_path / "Enterprise").mkdir()
+    expected = tmp_path / "Enterprise" / "Auth.md"
+    expected.write_text("# Auth\n", encoding="utf-8")
+
+    assert local_markdown_path(tmp_path, "enterprise/auth.md") == expected

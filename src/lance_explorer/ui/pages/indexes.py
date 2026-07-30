@@ -5,8 +5,13 @@ import streamlit as st
 
 from lance_explorer.config import AppConfig
 from lance_explorer.index_registry import (
+    FTS_BASE_TOKENIZERS,
+    FTS_LANGUAGES,
+    FTS_PRESETS,
     available_index_definitions,
     compatible_index_definitions,
+    fts_options_for_preset,
+    fts_uses_packaged_jieba,
 )
 from lance_explorer.paths import split_table_uri
 from lance_explorer.repository import LanceRepository
@@ -29,6 +34,101 @@ def _refresh_after_mutation(table_uri: str) -> None:
 def _show_status_once() -> None:
     if message := st.session_state.pop("index_status", None):
         st.success(message)
+
+
+def _apply_fts_preset_to_state(preset_key: str) -> None:
+    if st.session_state.get("fts_preset_applied") == preset_key:
+        return
+    options = fts_options_for_preset(preset_key)
+    for key, value in options.items():
+        st.session_state[f"fts_{key}"] = value
+    st.session_state["fts_max_token_length_enabled"] = (
+        options.get("max_token_length") is not None
+    )
+    st.session_state["fts_preset_applied"] = preset_key
+
+
+def _fts_config_controls() -> dict[str, object]:
+    preset_labels = {
+        key: f"{preset.label} - {preset.description}" for key, preset in FTS_PRESETS.items()
+    }
+    preset_key = st.selectbox("FTS preset", list(FTS_PRESETS), format_func=preset_labels.get)
+    _apply_fts_preset_to_state(preset_key)
+
+    first, second = st.columns(2)
+    with first:
+        with_position = st.checkbox(
+            "Store token positions",
+            key="fts_with_position",
+            help=help_text("fts_positions"),
+        )
+        base_tokenizer = st.selectbox(
+            "Base tokenizer",
+            FTS_BASE_TOKENIZERS,
+            key="fts_base_tokenizer",
+            help=help_text("fts_tokenizer"),
+        )
+        language = st.selectbox(
+            "Language",
+            FTS_LANGUAGES,
+            key="fts_language",
+            help=help_text("fts_language"),
+        )
+        max_token_length_enabled = st.checkbox(
+            "Limit max token length",
+            key="fts_max_token_length_enabled",
+        )
+        max_token_length = st.number_input(
+            "Max token length",
+            min_value=1,
+            max_value=100,
+            disabled=not max_token_length_enabled,
+            key="fts_max_token_length",
+        )
+    with second:
+        lower_case = st.checkbox("Lowercase tokens", key="fts_lower_case")
+        stem = st.checkbox("Stem tokens", key="fts_stem")
+        remove_stop_words = st.checkbox("Remove stop words", key="fts_remove_stop_words")
+        ascii_folding = st.checkbox("ASCII folding", key="fts_ascii_folding")
+        ngram_min_length = st.number_input(
+            "N-gram min length",
+            min_value=1,
+            max_value=20,
+            disabled=base_tokenizer != "ngram",
+            key="fts_ngram_min_length",
+        )
+        ngram_max_length = st.number_input(
+            "N-gram max length",
+            min_value=1,
+            max_value=20,
+            disabled=base_tokenizer != "ngram",
+            key="fts_ngram_max_length",
+        )
+        prefix_only = st.checkbox(
+            "Prefix-only n-grams",
+            disabled=base_tokenizer != "ngram",
+            key="fts_prefix_only",
+        )
+
+    config_options: dict[str, object] = {
+        "with_position": with_position,
+        "base_tokenizer": base_tokenizer,
+        "language": language,
+        "max_token_length": int(max_token_length) if max_token_length_enabled else None,
+        "lower_case": lower_case,
+        "stem": stem,
+        "remove_stop_words": remove_stop_words,
+        "ascii_folding": ascii_folding,
+        "ngram_min_length": int(ngram_min_length),
+        "ngram_max_length": int(ngram_max_length),
+        "prefix_only": prefix_only,
+    }
+    if fts_uses_packaged_jieba(config_options):
+        st.caption(
+            "Jieba uses packaged dictionary files under "
+            "`lance_explorer/language_models/jieba/default`."
+        )
+    return config_options
 
 
 def render(config: AppConfig) -> None:
@@ -81,16 +181,9 @@ def render(config: AppConfig) -> None:
             "Replace an index with the same name",
             help=help_text("replace_index"),
         )
-        with_position = st.checkbox(
-            "Store token positions (FTS only)",
-            value=True,
-            disabled=selected_type != "FTS",
-            help=help_text("fts_positions"),
-        )
-
         config_options: dict[str, object] = {}
         if selected_type == "FTS":
-            config_options["with_position"] = with_position
+            config_options = _fts_config_controls()
 
         definition = next(item for item in definitions if item.key == selected_type)
         show_code_export(
@@ -100,6 +193,7 @@ def render(config: AppConfig) -> None:
                 "column": selected_column,
                 "config_class": definition.class_name,
                 "config_options": config_options,
+                "needs_language_model_home": fts_uses_packaged_jieba(config_options),
                 "index_name": index_name.strip() or None,
                 "replace": replace,
             },

@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import shutil
-import subprocess
-import sys
-
 import streamlit as st
 
 from lance_explorer.config import AppConfig
 from lance_explorer.paths import split_table_uri
+from lance_explorer.ui.components.clipboard import browser_copy_button
 from lance_explorer.ui.help_text import LANCE_OVERVIEW, LANCE_STRENGTHS
 from lance_explorer.ui.pages import compare, docs, explorer, indexes, maintenance, query, table
 from lance_explorer.ui.state import initialize_state, select_table
@@ -55,6 +52,28 @@ def docs_page() -> None:
     docs.render()
 
 
+def _install_global_css() -> None:
+    """Install small rendering fixes that Streamlit does not expose as options."""
+
+    st.markdown(
+        """
+        <style>
+        code,
+        pre,
+        textarea,
+        input,
+        [data-testid="stCodeBlock"] *,
+        [data-testid="stTextArea"] *,
+        [data-testid="stTextInput"] * {
+            font-variant-ligatures: none;
+            font-feature-settings: "liga" 0, "calt" 0;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _short_table_label(table_uri: str) -> str:
     try:
         location = split_table_uri(table_uri)
@@ -66,34 +85,14 @@ def _short_table_label(table_uri: str) -> str:
         return table_uri
 
 
-def _copy_to_local_clipboard(value: str) -> None:
-    if sys.platform == "win32":
-        subprocess.run(["clip"], input=value, text=True, check=True)
-        return
-    if sys.platform == "darwin" and shutil.which("pbcopy"):
-        subprocess.run(["pbcopy"], input=value, text=True, check=True)
-        return
-    for command in ("wl-copy", "xclip"):
-        if shutil.which(command):
-            args = [command] if command == "wl-copy" else [command, "-selection", "clipboard"]
-            subprocess.run(args, input=value, text=True, check=True)
-            return
-    raise RuntimeError("No local clipboard command is available.")
-
-
 def _copy_table_uri_button(table_uri: str, *, key: str) -> None:
-    if st.button(
-        "",
-        key=key,
-        help="Copy full table URI",
-        icon=":material/content_copy:",
-        width="stretch",
-    ):
-        try:
-            _copy_to_local_clipboard(table_uri)
-            st.toast("Copied table URI")
-        except Exception as exc:
-            st.sidebar.error(f"Unable to copy table URI: {exc}")
+    browser_copy_button(
+        table_uri,
+        key_prefix=key,
+        label="Copy",
+        help_text="Copy full table URI",
+        compact=True,
+    )
 
 
 def _table_uri_row(
@@ -103,7 +102,7 @@ def _table_uri_row(
     icon: str,
     disabled: bool = False,
 ) -> bool:
-    label_col, copy_col = st.sidebar.columns([0.82, 0.18], vertical_alignment="center")
+    label_col, copy_col = st.sidebar.columns([0.76, 0.24], vertical_alignment="center")
     selected = label_col.button(
         _short_table_label(table_uri),
         key=key,
@@ -156,6 +155,7 @@ def main() -> None:
 
     st.set_option("client.toolbarMode", "viewer")
     st.set_page_config(page_title="Lance Explorer", page_icon="🗂️", layout="wide")
+    _install_global_css()
     config = AppConfig.from_env()
     initialize_state(config)
 
@@ -171,7 +171,7 @@ def main() -> None:
         st.Page(table_page, title="Table", icon="🗂️"),
         st.Page(query_page, title="Query", icon="🔎"),
         st.Page(compare_page, title="Compare", icon="⚖️"),
-        st.Page(indexes_page, title="Indexes", icon="🧭"),
+        st.Page(indexes_page, title="Indexes", icon="🔖"),
         st.Page(maintenance_page, title="Maintenance", icon="🛠️"),
         st.Page(docs_page, title="Docs", icon="📚"),
     ]

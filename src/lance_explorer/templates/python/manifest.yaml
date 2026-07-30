@@ -19,6 +19,11 @@ templates:
     title: Run a full-text query
     language: python
     required_context: [table_uri, text, column, columns, where, limit]
+  hybrid_query:
+    file: hybrid_query.py.j2
+    title: Run a hybrid query
+    language: python
+    required_context: [table_uri, text, vector, vector_column, fts_column, columns, where, limit, rerank]
   vector_query:
     file: vector_query.py.j2
     title: Run a pasted-vector query
@@ -28,12 +33,12 @@ templates:
     file: compare_tables.py.j2
     title: Compare two Lance tables
     language: python
-    required_context: [left_uri, right_uri, columns, key, limit]
+    required_context: [left_uri, right_uri, columns, key, limit, left_version, right_version]
   create_index:
     file: create_index.py.j2
     title: Create an index
     language: python
-    required_context: [table_uri, column, config_class, config_options, index_name, replace]
+    required_context: [table_uri, column, config_class, config_options, needs_language_model_home, index_name, replace]
   drop_index:
     file: drop_index.py.j2
     title: Drop an index

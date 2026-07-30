@@ -8,8 +8,10 @@ from typing import Any
 import lancedb
 import pyarrow as pa
 from faker import Faker
+from lancedb.index import FTS, IvfFlat
 
 from lance_explorer.config import lancedb_storage_options_from_env
+from lance_explorer.index_registry import fts_options_for_preset
 from lance_explorer.paths import has_uri_scheme, split_table_uri
 
 FAKER_LOCALE_ALIASES = {
@@ -33,6 +35,10 @@ FAKER_LOCALE_ALIASES = {
     "india": "en_IN",
 }
 
+DEMO_EMBEDDING_DIM = 64
+DEMO_VECTOR_INDEX_NAME = "embedding_vector_idx"
+DEMO_FTS_INDEX_NAME = "bio_multilingual_fts_idx"
+
 DEMO_SCHEMA = pa.schema(
     [
         pa.field("id", pa.int64()),
@@ -45,11 +51,11 @@ DEMO_SCHEMA = pa.schema(
         pa.field("birth_date", pa.date32()),
         pa.field("home_city", pa.string()),
         pa.field("country", pa.string()),
-        pa.field("genre", pa.string()),
+        pa.field("genre", pa.list_(pa.string())),
         pa.field("award_count", pa.int16()),
         pa.field("popularity_score", pa.float32()),
         pa.field("active", pa.bool_()),
-        pa.field("embedding", pa.list_(pa.float32(), 8)),
+        pa.field("embedding", pa.list_(pa.float32(), DEMO_EMBEDDING_DIM)),
     ]
 )
 DEMO_VERSIONED_FIELD = pa.field("publicity_risk", pa.string())
@@ -123,7 +129,7 @@ def demo_rows(
     for row_id in range(1, row_count + 1):
         profile = fake.profile()
         legal_name = str(profile["name"])
-        genre = randomizer.choice(_GENRES)
+        genres = randomizer.sample(_GENRES, k=randomizer.randint(1, min(5, len(_GENRES))))
         stage_name = f"{fake.first_name()} {fake.word().title()}"
         home_city = fake.city()
         country = fake.country()
@@ -134,7 +140,8 @@ def demo_rows(
         publicity_risk = _publicity_risk(award_count, active)
         bio_terms = randomizer.sample(_BIO_TERMS, k=3)
         bio = (
-            f"{stage_name} is a fictional {genre} movie star from {home_city}, {country}. "
+            f"{stage_name} is a fictional {', '.join(genres)} movie star from "
+            f"{home_city}, {country}. "
             f"The profile mentions {', '.join(bio_terms)} and an agency contact at "
             f"{agency_email}."
         )
@@ -149,11 +156,13 @@ def demo_rows(
             "birth_date": profile["birthdate"],
             "home_city": home_city,
             "country": country,
-            "genre": genre,
+            "genre": genres,
             "award_count": award_count,
             "popularity_score": round(randomizer.uniform(1.0, 100.0), 2),
             "active": active,
-            "embedding": [round(randomizer.uniform(-1.0, 1.0), 6) for _ in range(8)],
+            "embedding": [
+                round(randomizer.uniform(-1.0, 1.0), 6) for _ in range(DEMO_EMBEDDING_DIM)
+            ],
         }
         if include_publicity_risk:
             row["publicity_risk"] = publicity_risk
@@ -176,6 +185,28 @@ def _chunk_sizes(total: int, chunks: int) -> list[int]:
 
 def _base_schema_row(row: dict[str, Any]) -> dict[str, Any]:
     return {field.name: row[field.name] for field in DEMO_SCHEMA}
+
+
+def _create_demo_vector_index(table: Any, row_count: int) -> None:
+    """Create the demo table's default nearest-neighbor index."""
+
+    table.create_index(
+        "embedding",
+        config=IvfFlat(num_partitions=max(1, min(4, row_count))),
+        name=DEMO_VECTOR_INDEX_NAME,
+        replace=True,
+    )
+
+
+def _create_demo_fts_index(table: Any) -> None:
+    """Create the demo table's multilingual full-text index."""
+
+    table.create_index(
+        "bio",
+        config=FTS(**fts_options_for_preset("MULTILINGUAL")),
+        name=DEMO_FTS_INDEX_NAME,
+        replace=True,
+    )
 
 
 def create_demo_table(
@@ -228,6 +259,9 @@ def create_demo_table(
     for chunk_size in chunk_sizes[1:]:
         table.add(rows[offset : offset + chunk_size])
         offset += chunk_size
+
+    _create_demo_vector_index(table, row_count)
+    _create_demo_fts_index(table)
 
     return DemoTableResult(
         table_uri=location.table_uri,

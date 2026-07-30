@@ -42,6 +42,9 @@ During development you can also run:
 streamlit run src/lance_explorer/app.py
 ```
 
+The app uses browser-side clipboard buttons and runs Streamlit in viewer toolbar mode so normal
+`Ctrl+C` copying in tables is not intercepted by Streamlit's cache menu.
+
 ## Demo Data
 
 Create a local demo Lance table:
@@ -50,7 +53,9 @@ Create a local demo Lance table:
 lance-explorer --create-demo-data ./demo/movie_stars.lance
 ```
 
-Defaults: 100 fictional movie-star rows, Faker locale `usa`, and 3 table versions. Version 2 adds `publicity_risk` so schema diffing has something visible.
+Defaults: 100 fictional movie-star rows, Faker locale `usa`, 3 table versions, a 64-float
+`embedding` column, `embedding_vector_idx` on `embedding`, and `bio_multilingual_fts_idx` on
+`bio`. Version 2 adds `publicity_risk` so schema diffing has something visible.
 
 Useful options:
 
@@ -62,6 +67,17 @@ lance-explorer --create-demo-data ./demo/movie_stars.lance --overwrite-demo-data
 ```
 
 Faker locale aliases live in `src/lance_explorer/demo_data.py` as `FAKER_LOCALE_ALIASES`.
+
+The Indexes page includes English, multilingual ICU, and Jieba FTS presets. The Jieba preset uses
+packaged files in `src/lance_explorer/language_models/jieba/default`.
+
+## Using the App
+
+- Explorer selects `.lance` tables directly from clickable directory rows and keeps a deduped table history.
+- Table opens on the Sample tab; vector columns display as JSON arrays so embeddings can be copied.
+- Query supports bounded filters, full-text search, hybrid search, and raw-vector search. FTS selectors show only indexed string columns.
+- Compare pre-fills from the selected table and table history. Bounded row comparison lists only columns common to both table URIs.
+- Code export expanders show copyable Python for the current operation.
 
 ## Offline Docs
 
@@ -125,6 +141,13 @@ Run the test suite from the project root after installing the dev dependencies:
 ```bash
 ruff check .
 pytest
+```
+
+Build a wheel with Hatchling:
+
+```bash
+python -m pip install hatchling
+python -m hatchling build -t wheel
 ```
 
 ## Air-Gapped Install
