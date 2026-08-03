@@ -6,6 +6,7 @@ import pyarrow as pa
 from lance_explorer.demo_data import (
     DEMO_EMBEDDING_DIM,
     DEMO_FTS_INDEX_NAME,
+    DEMO_HEADSHOT_MIME,
     DEMO_VECTOR_INDEX_NAME,
     create_demo_table,
     demo_rows,
@@ -25,6 +26,10 @@ def test_demo_rows_use_locale_alias_and_expected_shape() -> None:
     assert all(isinstance(item, str) for item in rows[0]["genre"])
     assert len(rows[0]["embedding"]) == DEMO_EMBEDDING_DIM
     assert all(-1.0 <= value <= 1.0 for value in rows[0]["embedding"])
+    assert rows[0]["headshot_filename"].endswith(".png")
+    assert rows[0]["headshot_mime"] == DEMO_HEADSHOT_MIME
+    assert rows[0]["headshot_thumbnail_bytes"].startswith(b"\x89PNG")
+    assert rows[0]["headshot_full_bytes"].startswith(b"\x89PNG")
 
 
 def test_create_demo_table(tmp_path: Path) -> None:
@@ -44,8 +49,17 @@ def test_create_demo_table(tmp_path: Path) -> None:
     assert "id" in field_names
     assert "bio" in field_names
     assert "embedding" in field_names
+    assert "headshot_thumbnail_bytes" in field_names
+    assert "headshot_full_bytes" in field_names
     assert "publicity_risk" in field_names
     assert pa.types.is_list(table.schema.field("genre").type)
+    assert pa.types.is_binary(table.schema.field("headshot_thumbnail_bytes").type)
+    assert str(table.schema.field("headshot_full_bytes").type).startswith(
+        "extension<lance.blob"
+    )
+    sample = table.search().limit(1).to_pandas().iloc[0]
+    assert sample["headshot_thumbnail_bytes"].startswith(b"\x89PNG")
+    assert sample["headshot_full_bytes"].read().startswith(b"\x89PNG")
     assert "publicity_risk" not in LanceRepository().get_schema(result.table_uri, version=1).names
     assert len(table.list_versions()) >= 3
     indexes = LanceRepository().list_indexes(result.table_uri)

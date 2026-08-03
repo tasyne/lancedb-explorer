@@ -1,0 +1,41 @@
+from pathlib import Path
+
+import pyarrow as pa
+from lance import blob_array, blob_field
+
+{% include "open_table.py.j2" %}
+
+# Match these fields to your table schema. Blob v2 columns require a table created with
+# data_storage_version="2.2" or newer.
+thumbnail_bytes = Path("headshot_thumbnail.png").read_bytes()
+full_image_bytes = Path("headshot_full.png").read_bytes()
+
+batch_schema = pa.schema(
+    [
+        pa.field("id", pa.int64()),
+        pa.field("stage_name", pa.utf8()),
+        pa.field("bio", pa.utf8()),
+        pa.field("embedding", pa.list_(pa.float32(), 64)),
+        pa.field("headshot_mime", pa.utf8()),
+        pa.field("headshot_thumbnail_bytes", pa.binary()),
+        blob_field("headshot_full_bytes"),
+    ]
+)
+batch = pa.Table.from_arrays(
+    [
+        pa.array([1001], type=pa.int64()),
+        pa.array(["Ada Night"], type=pa.utf8()),
+        pa.array(["Award-winning actor known for tense historical dramas."], type=pa.utf8()),
+        pa.array([[0.1, -0.2, 0.0, *([0.05] * 61)]], type=pa.list_(pa.float32(), 64)),
+        pa.array(["image/png"], type=pa.utf8()),
+        pa.array([thumbnail_bytes], type=pa.binary()),
+        blob_array([full_image_bytes]),
+    ],
+    schema=batch_schema,
+)
+
+table.add(batch)
+
+# Schedule optimize after many small appends, deletes, or index-backed updates. It compacts
+# fragments and updates existing indexes; running it after every tiny write is usually wasteful.
+# table.optimize()

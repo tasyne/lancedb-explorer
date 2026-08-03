@@ -1,4 +1,14 @@
-from lance_explorer.index_registry import FTS_PRESETS, INDEX_DEFINITIONS, fts_options_for_preset
+import pyarrow as pa
+
+from lance_explorer.index_registry import (
+    FTS_BASE_TOKENIZERS,
+    FTS_PRESETS,
+    INDEX_DEFINITIONS,
+    compatible_index_definitions,
+    fts_options_for_preset,
+    fts_uses_packaged_model,
+    get_index_definition,
+)
 from lance_explorer.ui.help_text import HELP, LANCE_OVERVIEW, LANCE_STRENGTHS, help_text
 
 
@@ -41,7 +51,23 @@ def test_lance_overview_is_brief_and_explains_strengths() -> None:
 
 
 def test_every_registered_index_has_user_facing_guidance() -> None:
-    expected = {"BTREE", "BITMAP", "LABEL_LIST", "FM", "FTS"}
+    expected = {
+        "BTREE",
+        "BITMAP",
+        "LABEL_LIST",
+        "FM",
+        "FTS",
+        "IVF_FLAT",
+        "IVF_PQ",
+        "IVF_SQ",
+        "IVF_RQ",
+        "IVF_HNSW_FLAT",
+        "IVF_HNSW_PQ",
+        "IVF_HNSW_SQ",
+        "HNSW_FLAT",
+        "HNSW_PQ",
+        "HNSW_SQ",
+    }
     definitions = {definition.key: definition for definition in INDEX_DEFINITIONS}
 
     assert expected <= definitions.keys()
@@ -50,8 +76,37 @@ def test_every_registered_index_has_user_facing_guidance() -> None:
     assert all(len(definition.description) <= 100 for definition in definitions.values())
 
 
+def test_vector_indexes_are_compatible_with_float_vectors_only() -> None:
+    vector_keys = {
+        definition.key
+        for definition in compatible_index_definitions(pa.list_(pa.float32(), 4))
+        if definition.category == "vector"
+    }
+    assert {"IVF_FLAT", "IVF_PQ", "IVF_HNSW_SQ", "HNSW_FLAT"} <= vector_keys
+
+    non_vector_keys = {
+        definition.key
+        for definition in compatible_index_definitions(pa.string())
+        if definition.category == "vector"
+    }
+    assert non_vector_keys == set()
+    assert get_index_definition("IVF_FLAT").class_name == "IvfFlat"
+
+
 def test_fts_presets_cover_common_tokenizers() -> None:
-    assert {"ENGLISH", "MULTILINGUAL", "JIEBA"} <= FTS_PRESETS.keys()
+    assert {
+        "ENGLISH",
+        "MULTILINGUAL",
+        "JIEBA",
+        "LINDERA_IPADIC",
+        "LINDERA_UNIDIC",
+        "LINDERA_KO_DIC",
+    } <= FTS_PRESETS.keys()
     assert fts_options_for_preset("ENGLISH")["language"] == "English"
     assert fts_options_for_preset("MULTILINGUAL")["base_tokenizer"] == "icu"
     assert fts_options_for_preset("JIEBA")["base_tokenizer"] == "jieba/default"
+    assert "language" not in fts_options_for_preset("JIEBA")
+    assert "lindera/ipadic" in FTS_BASE_TOKENIZERS
+    assert "lindera/ko-dic" in FTS_BASE_TOKENIZERS
+    assert not fts_uses_packaged_model(fts_options_for_preset("LINDERA_IPADIC"))
+    assert fts_uses_packaged_model(fts_options_for_preset("JIEBA"))

@@ -12,8 +12,11 @@ import pyarrow as pa
 from lancedb.rerankers import RRFReranker
 
 from lance_explorer.config import lancedb_storage_options_from_env
-from lance_explorer.index_registry import fts_uses_packaged_jieba, get_index_definition
-from lance_explorer.language_models import ensure_packaged_language_model_home
+from lance_explorer.index_registry import fts_uses_packaged_model, get_index_definition
+from lance_explorer.language_models import (
+    configure_packaged_language_model,
+    ensure_packaged_language_model_home,
+)
 from lance_explorer.paths import TableLocation, split_table_uri
 from lance_explorer.schema_diff import schema_to_rows
 
@@ -137,6 +140,9 @@ class LanceRepository:
 
     @staticmethod
     def _connect(database_uri: str):
+        # Lance may initialize FTS tokenizers while reading index metadata. Set the
+        # bundled model root before every SDK operation while preserving user overrides.
+        ensure_packaged_language_model_home()
         return lancedb.connect(
             database_uri,
             storage_options=lancedb_storage_options_from_env() or None,
@@ -374,12 +380,12 @@ class LanceRepository:
         replace: bool = False,
         config_options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Create a non-vector index using registry-owned configuration."""
+        """Create an index using registry-owned LanceDB configuration classes."""
 
         definition = get_index_definition(index_type)
         options = config_options or {}
-        if index_type == "FTS" and fts_uses_packaged_jieba(options):
-            ensure_packaged_language_model_home()
+        if index_type == "FTS" and fts_uses_packaged_model(options):
+            configure_packaged_language_model(str(options.get("base_tokenizer", "")))
         config = definition.create_config(**options)
         table = self.open_table(table_uri)
         table.create_index(column, config=config, name=name or None, replace=replace)

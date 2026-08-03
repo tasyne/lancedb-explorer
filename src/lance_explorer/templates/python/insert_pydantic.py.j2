@@ -1,0 +1,34 @@
+from lancedb.pydantic import LanceModel, Vector
+
+{% include "open_table.py.j2" %}
+
+
+class MovieStarRow(LanceModel):
+    """Application row contract used before appending to LanceDB."""
+
+    id: int
+    stage_name: str
+    bio: str
+    genres: list[str]
+    active: bool
+    embedding: Vector(64)
+    headshot_mime: str | None = None
+    headshot_thumbnail_bytes: bytes | None = None
+
+
+# Pydantic-AI pipelines can return this model, then you can append validated model dumps.
+# For Lance Blob v2 columns, convert validated data into a PyArrow table with blob_array().
+incoming = [
+    MovieStarRow(
+        id=1001,
+        stage_name="Ada Night",
+        bio="Award-winning actor known for tense historical dramas.",
+        genres=["Drama", "Thriller"],
+        active=True,
+        embedding=[0.1, -0.2, 0.0, *([0.05] * 61)],
+        headshot_mime="image/png",
+        headshot_thumbnail_bytes=b"...png bytes...",
+    )
+]
+
+table.add([row.model_dump() for row in incoming])

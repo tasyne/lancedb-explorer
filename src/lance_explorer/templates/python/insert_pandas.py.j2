@@ -1,0 +1,24 @@
+import pandas as pd
+
+{% include "open_table.py.j2" %}
+
+# Pandas is convenient for scalar, text, boolean, date, list, and vector columns. Use PyArrow
+# directly when you need exact Arrow or Lance Blob v2 column types.
+rows = pd.DataFrame(
+    [
+        {
+            "id": 1001,
+            "stage_name": "Ada Night",
+            "bio": "Award-winning actor known for tense historical dramas.",
+            "genres": ["Drama", "Thriller"],
+            "active": True,
+            "embedding": [0.1, -0.2, 0.0, *([0.05] * 61)],
+        }
+    ]
+)
+
+table.add(rows)
+
+# Batch appends are healthier than many single-row writes. If a workflow creates many small
+# fragments or updates an indexed table, run optimize later as a separate maintenance step.
+# table.optimize()

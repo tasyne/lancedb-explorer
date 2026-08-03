@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Lance Explorer is a local-first Streamlit application for inspecting and operating on LanceDB tables without building a full administration platform. It is intended for developers, field engineers, and demo environments that need a practical way to browse storage, select `.lance` tables, inspect metadata, run bounded queries, compare versions/tables, manage non-vector indexes, perform maintenance, and view offline documentation.
+Lance Explorer is a local-first Streamlit application for inspecting and operating on LanceDB tables without building a full administration platform. It is intended for developers, field engineers, and demo environments that need a practical way to browse storage, select `.lance` tables, inspect metadata, run bounded queries, compare versions/tables, manage indexes, perform maintenance, and view offline documentation.
 
 The app is deliberately lightweight:
 
@@ -34,6 +34,8 @@ The app is deliberately lightweight:
 - Open with Sample first and Statistics last, matching the highest-frequency workflow.
 - Preview bounded rows on explicit request with all columns selected by default.
 - Render known vector columns as JSON strings in result tables so embeddings are copyable.
+- Provide read-only insertion/update guidance with generated examples for PyArrow Blob v2,
+  pandas appends, Pydantic validation, merge/upsert writes, and direct updates.
 - Compare schemas between versions with auto-filled first/latest defaults.
 - Export labeled code snippets for common table-open operations.
 
@@ -42,6 +44,8 @@ The app is deliberately lightweight:
 - Run bounded SQL-style filters with optional projection and plan output.
 - Run bounded FTS queries against FTS-indexed string columns only.
 - Run bounded hybrid searches with separate raw-vector and FTS text inputs.
+- Show packaged FTS language-model downloads and include tokenizer model-home setup in generated
+  FTS/Hybrid snippets when indexed metadata indicates a model-backed tokenizer.
 - Run bounded raw-vector queries against list-like vector columns.
 - Preserve score columns such as `_score` and `_distance` when the user selects return columns.
 - Keep results in session state after explicit submission only.
@@ -56,11 +60,14 @@ The app is deliberately lightweight:
 
 ### Indexes
 
-- Discover supported non-vector index classes from the installed LanceDB SDK.
-- Offer compatible B-tree, bitmap, label-list, FM, and FTS options based on Arrow field type.
-- Offer FTS presets for English, ICU multilingual, and packaged Jieba tokenization.
+- Discover supported scalar, text, and vector index classes from the installed LanceDB SDK.
+- Offer compatible B-tree, bitmap, label-list, FM, FTS, IVF, HNSW, and quantized vector options based on Arrow field type.
+- Offer FTS presets for English, ICU multilingual, packaged Jieba, and externally supplied
+  Lindera tokenization for Japanese and Korean.
+- Expose downloadable `.tar.gz` archives of packaged tokenizer models for offline FTS
+  reproduction, without bundling large Lindera dictionary binaries.
+- Explain vector index acronyms, partitioning, quantization, HNSW graph options, documented storage-size rules of thumb, and Optimize/update considerations in the UI.
 - Create, replace, and drop indexes with confirmation and post-mutation refresh.
-- Keep vector-index creation out of scope for this MVP.
 
 ### Maintenance
 
@@ -84,6 +91,8 @@ The app is deliberately lightweight:
 - Faker locale aliases support quick localized demos.
 - Demo rows include a 64-dimensional `embedding` vector, `embedding_vector_idx`, and
   `bio_multilingual_fts_idx`.
+- Demo rows include bundled PNG headshots: thumbnails use inline Arrow `binary`, and full images
+  use Lance Blob v2 columns created with file format `data_storage_version="2.2"`.
 - Multiple Lance versions are created by default so schema/history/diff features have data to demonstrate.
 
 ## Architecture
@@ -97,7 +106,7 @@ src/lance_explorer/
   repository.py             LanceDB API boundary and query/mutation limits
   comparison.py             Bounded metadata and row comparison
   schema_diff.py            Arrow schema flattening and diffing
-  index_registry.py         Non-vector index discovery and compatibility
+  index_registry.py         Index discovery, compatibility, and configuration metadata
   demo_data.py              Faker-backed demo table generation
   docs_index.py             llms.txt parsing and grouping
   docs_server.py            Safe zip extraction and loopback static serving
@@ -166,6 +175,7 @@ Tests focus on behavior with high regression risk:
 - repository integration against local Lance tables;
 - FTS and B-tree index workflows;
 - bounded table comparison;
+- insertion and mutation code-template rendering;
 - Compare-page default URI restoration and common-column discovery;
 - code-template rendering and override behavior;
 - demo-data generation and CLI routing;
@@ -185,7 +195,7 @@ pytest
 Prioritize only when the workflows justify the complexity:
 
 - branch and tag management;
-- general vector-index creation and tuning outside demo-data generation;
+- richer vector-index tuning recommendations based on table size and observed query workload;
 - exact large-table comparison using partitioned hashes or Lance-native execution;
 - stronger pagination for very large table collections;
 - background jobs for long-running mutations;

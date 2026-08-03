@@ -1,15 +1,26 @@
 {% include "open_table.py.j2" %}
-{% if needs_language_model_home %}from lance_explorer.language_models import packaged_language_model_home
+{% if needs_language_model_home %}from pathlib import Path
+
+from lance_explorer.language_models import configure_packaged_language_model
 {% endif %}
 from lancedb.index import {{ config_class }}
 
-{% if needs_language_model_home %}# Lance resolves tokenizer data from LANCE_LANGUAGE_MODEL_HOME.
+{% if needs_language_model_home %}# Lance resolves packaged tokenizer data from LANCE_LANGUAGE_MODEL_HOME.
 # For base_tokenizer="jieba/default", that directory should contain:
 #   $LANCE_LANGUAGE_MODEL_HOME/jieba/default/dict.txt
 #   $LANCE_LANGUAGE_MODEL_HOME/jieba/default/idf.txt
 #   $LANCE_LANGUAGE_MODEL_HOME/jieba/default/stop_words.txt
 # Keeping dict.txt.small beside dict.txt is optional but useful for testing/reference.
-os.environ.setdefault("LANCE_LANGUAGE_MODEL_HOME", str(packaged_language_model_home()))
+#
+# If you downloaded the .tar.gz from Lance Explorer and extracted it elsewhere, set:
+# os.environ["LANCE_LANGUAGE_MODEL_HOME"] = str(Path(r"C:\path\to\extracted\language_models"))
+configure_packaged_language_model({{ config_options.get("base_tokenizer") | pyrepr }})
+
+{% elif config_options.get("base_tokenizer", "").startswith("lindera/") %}# Lindera tokenizer dictionaries are not bundled here.
+# Before creating this index, set LANCE_LANGUAGE_MODEL_HOME to your language-model root and
+# set LINDERA_CONFIG_PATH to a config.yml whose segmenter.dictionary value points at the
+# compiled dictionary directory, such as:
+#   $LANCE_LANGUAGE_MODEL_HOME/lindera/ipadic/main
 
 {% endif %}
 config = {{ config_class }}(**{{ config_options | pyrepr }})

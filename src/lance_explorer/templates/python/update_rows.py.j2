@@ -1,0 +1,18 @@
+{% include "open_table.py.j2" %}
+
+# Use update when a SQL predicate identifies exactly the rows you intend to change.
+# For computed updates, values_sql can reference other columns in the same row.
+result = table.update(
+    where="id = 1001",
+    values={
+        "active": False,
+        "bio": "Biography revised by an approved enrichment job.",
+    },
+)
+print(result)
+
+counter_result = table.update(
+    where="id = 1001",
+    values_sql={"award_count": "award_count + 1"},
+)
+print(counter_result)

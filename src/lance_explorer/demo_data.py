@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import lancedb
 import pyarrow as pa
 from faker import Faker
+from lance import blob_array, blob_field
 from lancedb.index import FTS, IvfFlat
 
 from lance_explorer.config import lancedb_storage_options_from_env
@@ -38,6 +40,24 @@ FAKER_LOCALE_ALIASES = {
 DEMO_EMBEDDING_DIM = 64
 DEMO_VECTOR_INDEX_NAME = "embedding_vector_idx"
 DEMO_FTS_INDEX_NAME = "bio_multilingual_fts_idx"
+DEMO_HEADSHOT_MIME = "image/png"
+DEMO_HEADSHOT_ASSET_DIR = Path(__file__).with_name("demo_assets") / "headshots"
+DEMO_HEADSHOT_FILENAMES = (
+    "woman_01.png",
+    "woman_02.png",
+    "woman_03.png",
+    "woman_04.png",
+    "woman_05.png",
+    "man_01.png",
+    "man_02.png",
+    "man_03.png",
+    "man_04.png",
+    "man_05.png",
+)
+DEMO_BINARY_COLUMNS = (
+    "headshot_thumbnail_bytes",
+    "headshot_full_bytes",
+)
 
 DEMO_SCHEMA = pa.schema(
     [
@@ -56,9 +76,14 @@ DEMO_SCHEMA = pa.schema(
         pa.field("popularity_score", pa.float32()),
         pa.field("active", pa.bool_()),
         pa.field("embedding", pa.list_(pa.float32(), DEMO_EMBEDDING_DIM)),
+        pa.field("headshot_filename", pa.string()),
+        pa.field("headshot_mime", pa.string()),
+        pa.field("headshot_thumbnail_bytes", pa.binary()),
+        blob_field("headshot_full_bytes"),
     ]
 )
 DEMO_VERSIONED_FIELD = pa.field("publicity_risk", pa.string())
+DEMO_VERSIONED_SCHEMA = DEMO_SCHEMA.append(DEMO_VERSIONED_FIELD)
 
 _GENRES = [
     "action",
@@ -145,6 +170,7 @@ def demo_rows(
             f"The profile mentions {', '.join(bio_terms)} and an agency contact at "
             f"{agency_email}."
         )
+        headshot_filename, thumbnail_bytes, full_bytes = _headshot_payload(row_id)
         row = {
             "id": row_id,
             "legal_name": legal_name,
@@ -163,11 +189,30 @@ def demo_rows(
             "embedding": [
                 round(randomizer.uniform(-1.0, 1.0), 6) for _ in range(DEMO_EMBEDDING_DIM)
             ],
+            "headshot_filename": headshot_filename,
+            "headshot_mime": DEMO_HEADSHOT_MIME,
+            "headshot_thumbnail_bytes": thumbnail_bytes,
+            "headshot_full_bytes": full_bytes,
         }
         if include_publicity_risk:
             row["publicity_risk"] = publicity_risk
         rows.append(row)
     return rows
+
+
+@lru_cache(maxsize=1)
+def _headshot_assets() -> tuple[tuple[str, bytes, bytes], ...]:
+    assets: list[tuple[str, bytes, bytes]] = []
+    for filename in DEMO_HEADSHOT_FILENAMES:
+        full_path = DEMO_HEADSHOT_ASSET_DIR / filename
+        thumbnail_path = DEMO_HEADSHOT_ASSET_DIR / "thumbs" / filename
+        assets.append((filename, thumbnail_path.read_bytes(), full_path.read_bytes()))
+    return tuple(assets)
+
+
+def _headshot_payload(row_id: int) -> tuple[str, bytes, bytes]:
+    assets = _headshot_assets()
+    return assets[(row_id - 1) % len(assets)]
 
 
 def _publicity_risk(award_count: int, active: bool) -> str:
@@ -185,6 +230,17 @@ def _chunk_sizes(total: int, chunks: int) -> list[int]:
 
 def _base_schema_row(row: dict[str, Any]) -> dict[str, Any]:
     return {field.name: row[field.name] for field in DEMO_SCHEMA}
+
+
+def _arrow_table_from_rows(rows: list[dict[str, Any]], schema: pa.Schema) -> pa.Table:
+    arrays = []
+    for field in schema:
+        values = [row.get(field.name) for row in rows]
+        if field.name == "headshot_full_bytes":
+            arrays.append(blob_array(values))
+        else:
+            arrays.append(pa.array(values, type=field.type))
+    return pa.Table.from_arrays(arrays, schema=schema)
 
 
 def _create_demo_vector_index(table: Any, row_count: int) -> None:
@@ -239,9 +295,9 @@ def create_demo_table(
     row_chunk_count = max(1, version_count - 1)
     chunk_sizes = _chunk_sizes(row_count, row_chunk_count)
     first_chunk_size = chunk_sizes[0]
-    data = pa.Table.from_pylist(
+    data = _arrow_table_from_rows(
         [_base_schema_row(row) for row in rows[:first_chunk_size]],
-        schema=DEMO_SCHEMA,
+        DEMO_SCHEMA,
     )
     db = lancedb.connect(
         location.database_uri,
@@ -250,14 +306,16 @@ def create_demo_table(
     table = db.create_table(
         location.table_name,
         data=data,
+        schema=DEMO_SCHEMA,
         mode="overwrite" if overwrite else "create",
+        data_storage_version="2.2",
     )
     # Adding this field as a second write creates an explicit schema change for demos.
     table.add_columns(DEMO_VERSIONED_FIELD)
 
     offset = first_chunk_size
     for chunk_size in chunk_sizes[1:]:
-        table.add(rows[offset : offset + chunk_size])
+        table.add(_arrow_table_from_rows(rows[offset : offset + chunk_size], DEMO_VERSIONED_SCHEMA))
         offset += chunk_size
 
     _create_demo_vector_index(table, row_count)

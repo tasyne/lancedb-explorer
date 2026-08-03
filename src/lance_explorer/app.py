@@ -3,15 +3,19 @@ from __future__ import annotations
 import streamlit as st
 
 from lance_explorer.config import AppConfig
+from lance_explorer.language_models import ensure_packaged_language_model_home
 from lance_explorer.paths import split_table_uri
 from lance_explorer.ui.components.clipboard import browser_copy_button
 from lance_explorer.ui.help_text import LANCE_OVERVIEW, LANCE_STRENGTHS
-from lance_explorer.ui.pages import compare, docs, explorer, indexes, maintenance, query, table
 from lance_explorer.ui.state import initialize_state, select_table
+
+ensure_packaged_language_model_home()
 
 
 def explorer_page() -> None:
     """Render the storage/table explorer page."""
+
+    from lance_explorer.ui.pages import explorer
 
     explorer.render(AppConfig.from_env())
 
@@ -19,11 +23,15 @@ def explorer_page() -> None:
 def table_page() -> None:
     """Render table metadata, schema, version, and preview tools."""
 
+    from lance_explorer.ui.pages import table
+
     table.render(AppConfig.from_env())
 
 
 def query_page() -> None:
     """Render bounded filter, FTS, and raw-vector query tools."""
+
+    from lance_explorer.ui.pages import query
 
     query.render(AppConfig.from_env())
 
@@ -31,11 +39,15 @@ def query_page() -> None:
 def compare_page() -> None:
     """Render table metadata and bounded row comparison tools."""
 
+    from lance_explorer.ui.pages import compare
+
     compare.render(AppConfig.from_env())
 
 
 def indexes_page() -> None:
     """Render non-vector index inspection and management tools."""
+
+    from lance_explorer.ui.pages import indexes
 
     indexes.render(AppConfig.from_env())
 
@@ -43,11 +55,15 @@ def indexes_page() -> None:
 def maintenance_page() -> None:
     """Render table optimization, cleanup, restore, and drop tools."""
 
+    from lance_explorer.ui.pages import maintenance
+
     maintenance.render(AppConfig.from_env())
 
 
 def docs_page() -> None:
     """Render offline documentation mirrors and the local docs index."""
+
+    from lance_explorer.ui.pages import docs
 
     docs.render()
 

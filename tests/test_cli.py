@@ -50,10 +50,9 @@ def test_cli_create_demo_data_dispatches_to_generator(monkeypatch, capsys) -> No
         "version_count": 4,
         "overwrite": True,
     }
-    assert (
-        "Created demo Lance table /tmp/stars.lance with 12 rows across 4 versions"
-        in capsys.readouterr().out
-    )
+    output = capsys.readouterr().out
+    assert "Created demo Lance table /tmp/stars.lance with 12 rows across 4 versions" in output
+    assert "headshot_thumbnail_bytes, headshot_full_bytes" in output
 
 
 def test_cli_launches_streamlit_by_default(monkeypatch) -> None:
