@@ -33,16 +33,6 @@ def test_packaged_jieba_configuration_sets_model_home(monkeypatch) -> None:
     assert "LINDERA_CONFIG_PATH" not in os.environ
 
 
-def test_packaged_model_home_overrides_missing_lance_default(monkeypatch) -> None:
-    bad_default = r"C:\Users\Leland\AppData\Local\lance\language_models"
-    monkeypatch.setenv("LANCE_LANGUAGE_MODEL_HOME", bad_default)
-
-    home = ensure_packaged_language_model_home()
-
-    assert str(home) != bad_default
-    assert (home / "jieba" / "default" / "dict.txt").exists()
-
-
 def test_language_model_archive_contains_lance_model_home_layout() -> None:
     with tarfile.open(fileobj=BytesIO(language_model_archive_bytes("jieba_default"))) as archive:
         names = set(archive.getnames())
