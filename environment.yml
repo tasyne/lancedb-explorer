@@ -17,5 +17,5 @@ dependencies:
   - "ruff>=0.12,<1"
   - "hatchling>=1.27"
   - pip:
-      - lancedb==0.34.0
+      - lancedb[pylance]==0.34.0
       - universal-pathlib==0.3.10

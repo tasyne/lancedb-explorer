@@ -4,11 +4,13 @@ import pyarrow as pa
 import streamlit as st
 
 from lance_explorer.config import AppConfig
+from lance_explorer.language_models import fts_uses_packaged_language_model
 from lance_explorer.repository import LanceRepository, QueryResult, parse_vector
 from lance_explorer.ui.cache import cached_snapshot
 from lance_explorer.ui.components.code_export import show_code_export
 from lance_explorer.ui.components.common import table_uri_control, template_directory
 from lance_explorer.ui.components.dataframe import show_dataframe, vector_display_columns
+from lance_explorer.ui.components.language_models import show_language_model_downloads
 from lance_explorer.ui.help_text import help_text
 from lance_explorer.ui.state import generation_for
 
@@ -46,6 +48,38 @@ def _fts_indexed_columns(indexes: list[dict[str, object]], string_fields: list[s
     return [field for field in string_fields if field in fts_columns]
 
 
+def _fts_tokenizer_by_column(indexes: list[dict[str, object]]) -> dict[str, str]:
+    """Return detected FTS base_tokenizer values keyed by indexed column."""
+
+    tokenizers: dict[str, str] = {}
+    for index in indexes:
+        index_type = str(index.get("index_type") or index.get("type") or "").lower()
+        type_url = str(index.get("type_url") or "").lower()
+        if "fts" not in index_type and "inverted" not in type_url:
+            continue
+        details = index.get("index_details")
+        base_tokenizer = ""
+        if isinstance(details, dict):
+            base_tokenizer = str(details.get("base_tokenizer") or "")
+        columns = index.get("columns") or []
+        column_names = [columns] if isinstance(columns, str) else columns
+        for column in column_names:
+            if base_tokenizer:
+                tokenizers[str(column)] = base_tokenizer
+    return tokenizers
+
+
+def _language_model_context(base_tokenizer: str) -> dict[str, object]:
+    """Return template context for FTS model-backed tokenizer setup."""
+
+    return {
+        "fts_model_id": base_tokenizer,
+        "needs_language_model_home": fts_uses_packaged_language_model(
+            {"base_tokenizer": base_tokenizer}
+        ),
+    }
+
+
 def render(config: AppConfig) -> None:
     """Render bounded filter, full-text, hybrid, and raw-vector query workflows."""
 
@@ -68,6 +102,7 @@ def render(config: AppConfig) -> None:
         if pa.types.is_string(data_type) or pa.types.is_large_string(data_type)
     ]
     fts_fields = _fts_indexed_columns(snapshot.get("indexes", []), string_fields)
+    fts_tokenizers = _fts_tokenizer_by_column(snapshot.get("indexes", []))
     vector_fields = [
         name
         for name, data_type in type_by_field.items()
@@ -132,6 +167,7 @@ def render(config: AppConfig) -> None:
             "Search text example: words to search across full-text index",
             help=help_text("fts_query"),
         )
+        show_language_model_downloads(key_prefix="query-fts")
         if not fts_fields:
             st.warning("No FTS-indexed string columns are available.")
         else:
@@ -184,6 +220,7 @@ def render(config: AppConfig) -> None:
                     "columns": fts_columns,
                     "where": fts_where.strip(),
                     "limit": int(fts_limit),
+                    **_language_model_context(fts_tokenizers.get(fts_column, "")),
                 },
                 template_directory=template_directory(config),
             )
@@ -193,6 +230,7 @@ def render(config: AppConfig) -> None:
             "Hybrid search combines a pasted vector with full-text search.",
             help=help_text("hybrid_query"),
         )
+        show_language_model_downloads(key_prefix="query-hybrid")
         if not fts_fields or not vector_fields:
             st.warning("Hybrid search needs one FTS-indexed string column and one vector column.")
         else:
@@ -277,6 +315,7 @@ def render(config: AppConfig) -> None:
                     "where": hybrid_where.strip(),
                     "limit": int(hybrid_limit),
                     "rerank": hybrid_rerank,
+                    **_language_model_context(fts_tokenizers.get(hybrid_fts_column, "")),
                 },
                 template_directory=template_directory(config),
             )

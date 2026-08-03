@@ -170,7 +170,9 @@ def render(config: AppConfig) -> None:
     _render_breadcrumbs(current_uri)
 
     if is_lance_table_path(current_uri):
-        select_table(current_uri)
+        if st.session_state.get("selected_table_uri") != current_uri:
+            select_table(current_uri)
+            st.rerun()
         st.info("This URI looks like a Lance table and is now the selected table.")
         show_code_export(
             "open_table",

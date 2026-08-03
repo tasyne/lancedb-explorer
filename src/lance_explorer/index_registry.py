@@ -3,11 +3,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Any
+from typing import Any, Literal
 
 import pyarrow as pa
 
+from lance_explorer.language_models import (
+    fts_uses_packaged_language_model,
+    model_backed_tokenizers,
+)
+
 Compatibility = Callable[[pa.DataType], bool]
+IndexCategory = Literal["scalar", "text", "vector"]
 
 
 def _scalar(data_type: pa.DataType) -> bool:
@@ -37,15 +43,22 @@ def _list(data_type: pa.DataType) -> bool:
     )
 
 
+def _float_vector(data_type: pa.DataType) -> bool:
+    if not _list(data_type):
+        return False
+    return pa.types.is_floating(data_type.value_type)
+
+
 @dataclass(frozen=True, slots=True)
 class IndexDefinition:
-    """UI and construction metadata for one LanceDB non-vector index type."""
+    """UI and construction metadata for one LanceDB index type."""
 
     key: str
     class_name: str
     label: str
     description: str
     compatible: Compatibility
+    category: IndexCategory = "scalar"
     template: str = "create_index"
 
     def available(self) -> bool:
@@ -100,6 +113,7 @@ INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
         "FM",
         "Best for raw substring searches in paths, URLs, identifiers, or logs.",
         _string,
+        "text",
     ),
     IndexDefinition(
         "FTS",
@@ -107,6 +121,89 @@ INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
         "Full-text search",
         "Best for BM25-ranked keyword and phrase search over natural language.",
         _string,
+        "text",
+    ),
+    IndexDefinition(
+        "IVF_FLAT",
+        "IvfFlat",
+        "IvfFlat - Inverted File Flat, raw vectors",
+        "Best for IVF partitioning without vector compression.",
+        _float_vector,
+        "vector",
+    ),
+    IndexDefinition(
+        "IVF_PQ",
+        "IvfPq",
+        "IvfPq - Inverted File with Product Quantization",
+        "Best for smaller indexes with good recall on lower-dimensional vectors.",
+        _float_vector,
+        "vector",
+    ),
+    IndexDefinition(
+        "IVF_SQ",
+        "IvfSq",
+        "IvfSq - Inverted File with Scalar Quantization",
+        "Best for balanced vector compression, latency, and recall.",
+        _float_vector,
+        "vector",
+    ),
+    IndexDefinition(
+        "IVF_RQ",
+        "IvfRq",
+        "IvfRq - Inverted File with RaBitQ Quantization",
+        "Best for high compression on large, high-dimensional vector datasets.",
+        _float_vector,
+        "vector",
+    ),
+    IndexDefinition(
+        "IVF_HNSW_FLAT",
+        "IvfHnswFlat",
+        "IvfHnswFlat - Inverted File plus Hierarchical Navigable Small World, raw vectors",
+        "Best for high recall with IVF partitioning and no compression.",
+        _float_vector,
+        "vector",
+    ),
+    IndexDefinition(
+        "IVF_HNSW_PQ",
+        "IvfHnswPq",
+        "IvfHnswPq - Inverted File plus Hierarchical Navigable Small World "
+        "with Product Quantization",
+        "Best for HNSW recall with product-quantized storage.",
+        _float_vector,
+        "vector",
+    ),
+    IndexDefinition(
+        "IVF_HNSW_SQ",
+        "IvfHnswSq",
+        "IvfHnswSq - Inverted File plus Hierarchical Navigable Small World "
+        "with Scalar Quantization",
+        "Best for HNSW recall with scalar-quantized storage.",
+        _float_vector,
+        "vector",
+    ),
+    IndexDefinition(
+        "HNSW_FLAT",
+        "HnswFlat",
+        "HnswFlat - Hierarchical Navigable Small World, raw vectors",
+        "Best for high recall graph search without compression.",
+        _float_vector,
+        "vector",
+    ),
+    IndexDefinition(
+        "HNSW_PQ",
+        "HnswPq",
+        "HnswPq - Hierarchical Navigable Small World with Product Quantization",
+        "Best for graph search with product-quantized vectors.",
+        _float_vector,
+        "vector",
+    ),
+    IndexDefinition(
+        "HNSW_SQ",
+        "HnswSq",
+        "HnswSq - Hierarchical Navigable Small World with Scalar Quantization",
+        "Best for graph search with scalar-quantized vectors.",
+        _float_vector,
+        "vector",
     ),
 )
 
@@ -117,7 +214,7 @@ FTS_BASE_TOKENIZERS = (
     "ngram",
     "icu",
     "icu/split",
-    "jieba/default",
+    *model_backed_tokenizers(),
 )
 FTS_LANGUAGES = (
     "Arabic",
@@ -183,7 +280,57 @@ FTS_PRESETS: dict[str, FtsPreset] = {
         {
             "with_position": True,
             "base_tokenizer": "jieba/default",
-            "language": "English",
+            "max_token_length": 40,
+            "lower_case": True,
+            "stem": False,
+            "remove_stop_words": False,
+            "ascii_folding": False,
+            "ngram_min_length": 3,
+            "ngram_max_length": 3,
+            "prefix_only": False,
+        },
+    ),
+    "LINDERA_IPADIC": FtsPreset(
+        "LINDERA_IPADIC",
+        "Japanese - Lindera IPADIC",
+        "Japanese morphological tokenization with an externally supplied Lindera IPADIC model.",
+        {
+            "with_position": True,
+            "base_tokenizer": "lindera/ipadic",
+            "max_token_length": 40,
+            "lower_case": True,
+            "stem": False,
+            "remove_stop_words": False,
+            "ascii_folding": False,
+            "ngram_min_length": 3,
+            "ngram_max_length": 3,
+            "prefix_only": False,
+        },
+    ),
+    "LINDERA_UNIDIC": FtsPreset(
+        "LINDERA_UNIDIC",
+        "Japanese - Lindera UniDic",
+        "Japanese morphological tokenization with an externally supplied Lindera UniDic model.",
+        {
+            "with_position": True,
+            "base_tokenizer": "lindera/unidic",
+            "max_token_length": 40,
+            "lower_case": True,
+            "stem": False,
+            "remove_stop_words": False,
+            "ascii_folding": False,
+            "ngram_min_length": 3,
+            "ngram_max_length": 3,
+            "prefix_only": False,
+        },
+    ),
+    "LINDERA_KO_DIC": FtsPreset(
+        "LINDERA_KO_DIC",
+        "Korean - Lindera ko-dic",
+        "Korean morphological tokenization with an externally supplied Lindera ko-dic model.",
+        {
+            "with_position": True,
+            "base_tokenizer": "lindera/ko-dic",
             "max_token_length": 40,
             "lower_case": True,
             "stem": False,
@@ -232,3 +379,9 @@ def fts_uses_packaged_jieba(config_options: dict[str, Any]) -> bool:
     """Return whether FTS options need the bundled Jieba language model files."""
 
     return str(config_options.get("base_tokenizer", "")).startswith("jieba/")
+
+
+def fts_uses_packaged_model(config_options: dict[str, Any]) -> bool:
+    """Return whether FTS options need any bundled tokenizer model files."""
+
+    return fts_uses_packaged_language_model(config_options)

@@ -1,0 +1,23 @@
+{% if needs_language_model_home %}from pathlib import Path
+
+from lance_explorer.language_models import configure_packaged_language_model
+
+# This query uses a model-backed FTS tokenizer: {{ fts_model_id | pyrepr }}.
+# Option A: use the packaged model files that ship with lance-explorer.
+configure_packaged_language_model({{ fts_model_id | pyrepr }})
+
+# Option B: after downloading and extracting the .tar.gz from Lance Explorer, point
+# LANCE_LANGUAGE_MODEL_HOME at the extracted language_models directory.
+# Example:
+# os.environ["LANCE_LANGUAGE_MODEL_HOME"] = str(Path(r"C:\path\to\extracted") / "language_models")
+
+{% elif fts_model_id.startswith("lindera/") %}from pathlib import Path
+
+# This query uses a Lindera FTS tokenizer: {{ fts_model_id | pyrepr }}.
+# Lindera dictionaries are not bundled. Before querying, point Lance at your compiled model files:
+# os.environ["LANCE_LANGUAGE_MODEL_HOME"] = str(Path(r"C:\path\to\language_models"))
+# os.environ["LINDERA_CONFIG_PATH"] = str(Path(r"C:\path\to\lindera-config.yml"))
+# The config.yml should contain segmenter.dictionary pointing at, for example:
+#   C:/path/to/language_models/lindera/ipadic/main
+
+{% endif %}

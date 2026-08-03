@@ -38,6 +38,100 @@ def _sync_schema_diff_defaults(table_uri: str, version_numbers: list[int]) -> No
     st.session_state["schema-right-version"] = str(version_numbers[-1])
 
 
+def _render_insert_guidance(config: AppConfig, table_uri: str) -> None:
+    """Render read-only insertion and update guidance for the selected table."""
+
+    template_dir = template_directory(config)
+    context = {"table_uri": table_uri, "open_version": None}
+
+    st.caption("Read-only insertion and update guide", help=help_text("insert_data"))
+    st.info(
+        "This tab only generates reference code. It does not provide forms that write to the "
+        "selected table."
+    )
+
+    st.markdown(
+        """
+        Before inserting production data:
+
+        - Use `table.add(...)` to append to an existing table. `create_table(..., exist_ok=True)`
+          opens an existing table and validates schema, but it does not append the provided rows.
+        - Batch writes when possible. LanceDB can parallelize large materialized writes, while many
+          tiny appends create fragments that later need compaction.
+        - Prefer pandas for familiar scalar/text/vector appends, PyArrow for exact Arrow types, and
+          `LanceModel` when you want Pydantic validation before writing.
+        - Use inline Arrow `binary` for small payloads such as thumbnails. Use Lance Blob v2
+          columns for larger images or file-like/partial-read workflows; Blob v2 requires tables
+          written with `data_storage_version="2.2"` or newer.
+        - Writes create new table versions. After many small appends, deletes, or index-backed
+          updates, run `table.optimize()` during a maintenance window to compact fragments, prune
+          old data when configured, and incorporate newly written rows into existing indexes.
+        - For updates, prefer `merge_insert(...)` when matching incoming rows by key. Use direct
+          `update(...)` only when a SQL predicate unambiguously identifies the target rows.
+        """
+    )
+
+    arrow_tab, pandas_tab, pydantic_tab, merge_tab, update_tab = st.tabs(
+        ["Arrow + blobs", "Pandas", "Pydantic", "Merge/upsert", "Update"]
+    )
+    with arrow_tab:
+        st.write(
+            "Use this pattern when you need explicit Arrow types or Blob v2 image payloads. "
+            "The incoming schema must be compatible with the table schema."
+        )
+        show_code_export(
+            "insert_arrow_blobs",
+            context,
+            template_directory=template_dir,
+            label="Code export: Append Arrow rows with image blobs",
+        )
+    with pandas_tab:
+        st.write(
+            "Pandas is the simplest path for teams that already build DataFrames. Use Arrow when "
+            "you need precise binary/blob storage controls."
+        )
+        show_code_export(
+            "insert_pandas",
+            context,
+            template_directory=template_dir,
+            label="Code export: Append a pandas DataFrame",
+        )
+    with pydantic_tab:
+        st.write(
+            "`LanceModel` adds Pydantic validation and LanceDB-aware vector fields. "
+            "Pydantic-AI can produce or validate these model instances before they are "
+            "converted to rows."
+        )
+        show_code_export(
+            "insert_pydantic",
+            context,
+            template_directory=template_dir,
+            label="Code export: Validate rows with Pydantic",
+        )
+    with merge_tab:
+        st.write(
+            "Use merge/upsert when incoming rows should update matching keys and insert missing "
+            "keys in one committed write."
+        )
+        show_code_export(
+            "merge_upsert",
+            context,
+            template_directory=template_dir,
+            label="Code export: Merge or upsert rows by key",
+        )
+    with update_tab:
+        st.write(
+            "Use direct updates for small, well-scoped changes where a SQL predicate identifies "
+            "the target rows clearly."
+        )
+        show_code_export(
+            "update_rows",
+            context,
+            template_directory=template_dir,
+            label="Code export: Update rows with a SQL predicate",
+        )
+
+
 def render(config: AppConfig) -> None:
     """Render selected-table metadata, versions, schema diff, and preview."""
 
@@ -73,8 +167,16 @@ def render(config: AppConfig) -> None:
     )
     metrics[3].metric("Indices", len(snapshot.get("indexes", [])), help=help_text("indexes"))
 
-    sample_tab, schema_tab, versions_tab, schema_changes_tab, indexes_tab, statistics_tab = st.tabs(
-        ["Sample", "Schema", "Versions", "Schema changes", "Indexes", "Statistics"]
+    (
+        sample_tab,
+        insert_tab,
+        schema_tab,
+        versions_tab,
+        schema_changes_tab,
+        indexes_tab,
+        statistics_tab,
+    ) = st.tabs(
+        ["Sample", "Insert data", "Schema", "Versions", "Schema changes", "Indexes", "Statistics"]
     )
     with sample_tab:
         st.caption("Bounded data preview", help=help_text("sample"))
@@ -95,6 +197,8 @@ def render(config: AppConfig) -> None:
         preview = st.session_state.get("table_preview")
         if preview is not None:
             show_dataframe(preview, vector_columns=display_vector_columns)
+    with insert_tab:
+        _render_insert_guidance(config, table_uri)
     with schema_tab:
         st.caption("Arrow schema", help=help_text("schema"))
         st.dataframe(pd.DataFrame(snapshot["schema"]), width="stretch")

@@ -9,6 +9,31 @@ templates:
     title: Open a Lance table
     language: python
     required_context: [table_uri, open_version]
+  insert_arrow_blobs:
+    file: insert_arrow_blobs.py.j2
+    title: Append Arrow rows with image blobs
+    language: python
+    required_context: [table_uri, open_version]
+  insert_pandas:
+    file: insert_pandas.py.j2
+    title: Append a pandas DataFrame
+    language: python
+    required_context: [table_uri, open_version]
+  insert_pydantic:
+    file: insert_pydantic.py.j2
+    title: Validate rows with Pydantic before append
+    language: python
+    required_context: [table_uri, open_version]
+  merge_upsert:
+    file: merge_upsert.py.j2
+    title: Merge or upsert rows by key
+    language: python
+    required_context: [table_uri, open_version]
+  update_rows:
+    file: update_rows.py.j2
+    title: Update rows with a SQL predicate
+    language: python
+    required_context: [table_uri, open_version]
   filter_query:
     file: filter_query.py.j2
     title: Run a filter query
@@ -18,12 +43,12 @@ templates:
     file: fts_query.py.j2
     title: Run a full-text query
     language: python
-    required_context: [table_uri, text, column, columns, where, limit]
+    required_context: [table_uri, text, column, columns, where, limit, fts_model_id, needs_language_model_home]
   hybrid_query:
     file: hybrid_query.py.j2
     title: Run a hybrid query
     language: python
-    required_context: [table_uri, text, vector, vector_column, fts_column, columns, where, limit, rerank]
+    required_context: [table_uri, text, vector, vector_column, fts_column, columns, where, limit, rerank, fts_model_id, needs_language_model_home]
   vector_query:
     file: vector_query.py.j2
     title: Run a pasted-vector query

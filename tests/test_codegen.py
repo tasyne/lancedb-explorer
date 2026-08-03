@@ -45,11 +45,57 @@ def test_jieba_index_template_configures_packaged_language_models() -> None:
         },
     )
 
-    assert 'os.environ.setdefault("LANCE_LANGUAGE_MODEL_HOME"' in code
+    assert "configure_packaged_language_model('jieba/default')" in code
     assert "$LANCE_LANGUAGE_MODEL_HOME/jieba/default/dict.txt" in code
     assert "$LANCE_LANGUAGE_MODEL_HOME/jieba/default/idf.txt" in code
     assert "$LANCE_LANGUAGE_MODEL_HOME/jieba/default/stop_words.txt" in code
     assert "jieba/default" in code
+
+
+def test_lindera_index_template_does_not_assume_packaged_models() -> None:
+    code = TemplateRenderer().render(
+        "create_index",
+        {
+            "table_uri": "/tmp/db/items.lance",
+            "column": "text_ja",
+            "config_class": "FTS",
+            "config_options": {"base_tokenizer": "lindera/ipadic"},
+            "needs_language_model_home": False,
+            "index_name": "ja_idx",
+            "replace": False,
+        },
+    )
+
+    assert "configure_packaged_language_model" not in code
+    assert "lindera/ipadic" in code
+    assert "LINDERA_CONFIG_PATH" in code
+
+
+def test_vector_index_template_renders_vector_configuration() -> None:
+    code = TemplateRenderer().render(
+        "create_index",
+        {
+            "table_uri": "/tmp/db/items.lance",
+            "column": "embedding",
+            "config_class": "IvfHnswSq",
+            "config_options": {
+                "distance_type": "cosine",
+                "num_partitions": 2,
+                "max_iterations": 50,
+                "sample_rate": 256,
+                "m": 20,
+                "ef_construction": 300,
+            },
+            "needs_language_model_home": False,
+            "index_name": "embedding_ivf_hnsw_sq_idx",
+            "replace": True,
+        },
+    )
+
+    assert "from lancedb.index import IvfHnswSq" in code
+    assert "distance_type" in code
+    assert "ef_construction" in code
+    assert "embedding_ivf_hnsw_sq_idx" in code
 
 
 def test_open_table_template_uses_checkout_for_versions() -> None:
@@ -61,6 +107,62 @@ def test_open_table_template_uses_checkout_for_versions() -> None:
     assert "db.open_table(table_path.name.removesuffix(\".lance\"))" in code
     assert "version=open_version" not in code
     assert "table.checkout(open_version)" in code
+
+
+def test_insert_arrow_blob_template_renders_blob_v2_example() -> None:
+    code = TemplateRenderer().render(
+        "insert_arrow_blobs",
+        {"table_uri": "/tmp/db/items.lance", "open_version": None},
+    )
+
+    assert "blob_field(\"headshot_full_bytes\")" in code
+    assert "blob_array([full_image_bytes])" in code
+    assert "data_storage_version=\"2.2\"" in code
+    assert "table.add(batch)" in code
+
+
+def test_insert_pandas_template_renders_dataframe_append() -> None:
+    code = TemplateRenderer().render(
+        "insert_pandas",
+        {"table_uri": "/tmp/db/items.lance", "open_version": None},
+    )
+
+    assert "pd.DataFrame" in code
+    assert "table.add(rows)" in code
+    assert "embedding" in code
+
+
+def test_insert_pydantic_template_renders_model_validation() -> None:
+    code = TemplateRenderer().render(
+        "insert_pydantic",
+        {"table_uri": "/tmp/db/items.lance", "open_version": None},
+    )
+
+    assert "LanceModel" in code
+    assert "Vector(64)" in code
+    assert "model_dump()" in code
+
+
+def test_merge_upsert_template_renders_merge_insert_builder() -> None:
+    code = TemplateRenderer().render(
+        "merge_upsert",
+        {"table_uri": "/tmp/db/items.lance", "open_version": None},
+    )
+
+    assert 'table.merge_insert("id")' in code
+    assert "when_matched_update_all" in code
+    assert "when_not_matched_insert_all" in code
+
+
+def test_update_rows_template_renders_predicate_update() -> None:
+    code = TemplateRenderer().render(
+        "update_rows",
+        {"table_uri": "/tmp/db/items.lance", "open_version": None},
+    )
+
+    assert "table.update(" in code
+    assert 'where="id = 1001"' in code
+    assert "values_sql" in code
 
 
 def test_compare_template_uses_checkout_for_versions() -> None:
@@ -95,6 +197,8 @@ def test_hybrid_query_template_uses_text_vector_and_optional_rerank() -> None:
             "where": "",
             "limit": 10,
             "rerank": True,
+            "fts_model_id": "",
+            "needs_language_model_home": False,
         },
     )
 
@@ -104,6 +208,26 @@ def test_hybrid_query_template_uses_text_vector_and_optional_rerank() -> None:
     assert "from lancedb.rerankers import RRFReranker" in code
     assert 'query.rerank(RRFReranker(return_score="all"))' in code
     assert "_score" in code
+
+
+def test_fts_query_template_includes_jieba_language_model_setup() -> None:
+    code = TemplateRenderer().render(
+        "fts_query",
+        {
+            "table_uri": "/tmp/db/items.lance",
+            "text": "南京",
+            "column": "bio",
+            "columns": ["id", "bio"],
+            "where": "",
+            "limit": 10,
+            "fts_model_id": "jieba/default",
+            "needs_language_model_home": True,
+        },
+    )
+
+    assert "configure_packaged_language_model('jieba/default')" in code
+    assert 'os.environ["LANCE_LANGUAGE_MODEL_HOME"]' in code
+    assert "language_models" in code
 
 
 def test_template_context_rejects_secret_keys() -> None:
@@ -134,6 +258,11 @@ def test_all_python_templates_render_as_valid_python() -> None:
     contexts = {
         "connect": {"database_uri": "/tmp/db"},
         "open_table": {"table_uri": "/tmp/db/items.lance", "open_version": None},
+        "insert_arrow_blobs": {"table_uri": "/tmp/db/items.lance", "open_version": None},
+        "insert_pandas": {"table_uri": "/tmp/db/items.lance", "open_version": None},
+        "insert_pydantic": {"table_uri": "/tmp/db/items.lance", "open_version": None},
+        "merge_upsert": {"table_uri": "/tmp/db/items.lance", "open_version": None},
+        "update_rows": {"table_uri": "/tmp/db/items.lance", "open_version": None},
         "filter_query": {
             "table_uri": "/tmp/db/items.lance",
             "columns": ["id"],
@@ -147,6 +276,8 @@ def test_all_python_templates_render_as_valid_python() -> None:
             "columns": ["id", "text"],
             "where": "",
             "limit": 10,
+            "fts_model_id": "",
+            "needs_language_model_home": False,
         },
         "hybrid_query": {
             "table_uri": "/tmp/db/items.lance",
@@ -158,6 +289,8 @@ def test_all_python_templates_render_as_valid_python() -> None:
             "where": "",
             "limit": 10,
             "rerank": False,
+            "fts_model_id": "",
+            "needs_language_model_home": False,
         },
         "vector_query": {
             "table_uri": "/tmp/db/items.lance",

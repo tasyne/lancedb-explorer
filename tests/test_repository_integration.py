@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import lancedb
-from lancedb.index import IvfFlat
 
 from lance_explorer.repository import LanceRepository
 
@@ -88,7 +87,7 @@ def test_local_fts_index_and_search(tmp_path: Path) -> None:
 
 def test_local_hybrid_search_uses_text_and_vector(tmp_path: Path) -> None:
     db = lancedb.connect(str(tmp_path))
-    table = db.create_table(
+    db.create_table(
         "documents",
         data=[
             {"id": 1, "text": "red apple", "embedding": [0.1, 0.2, 0.3, 0.4]},
@@ -106,11 +105,13 @@ def test_local_hybrid_search_uses_text_and_vector(tmp_path: Path) -> None:
         name="text_idx",
         config_options={"with_position": True},
     )
-    table.create_index(
-        "embedding",
-        config=IvfFlat(num_partitions=2),
+    repository.create_index(
+        uri,
+        column="embedding",
+        index_type="IVF_FLAT",
         name="embedding_idx",
         replace=True,
+        config_options={"num_partitions": 2},
     )
     result = repository.run_hybrid(
         uri,
@@ -156,7 +157,9 @@ def test_jieba_fts_index_uses_packaged_language_models(tmp_path: Path, monkeypat
         },
     )
 
-    indexes = repository.list_indexes(uri)
+    monkeypatch.delenv("LANCE_LANGUAGE_MODEL_HOME", raising=False)
+    snapshot = repository.snapshot(uri)
+    indexes = snapshot["indexes"]
     jieba = next(index for index in indexes if index.get("name") == "jieba_idx")
     assert jieba["index_details"]["base_tokenizer"] == "jieba/default"
 

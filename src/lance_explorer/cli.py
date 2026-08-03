@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from lance_explorer.demo_data import (
+    DEMO_BINARY_COLUMNS,
     DEMO_FTS_INDEX_NAME,
     DEMO_VECTOR_INDEX_NAME,
     FAKER_LOCALE_ALIASES,
@@ -86,6 +87,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             "Created demo Lance table "
             f"{result.table_uri} with {result.row_count} rows across "
             f"{result.version_count} versions using Faker locale {result.locale}. "
+            f"Included image binary/blob columns {', '.join(DEMO_BINARY_COLUMNS)}. "
             f"Created indexes {DEMO_VECTOR_INDEX_NAME} on embedding and "
             f"{DEMO_FTS_INDEX_NAME} on bio."
         )

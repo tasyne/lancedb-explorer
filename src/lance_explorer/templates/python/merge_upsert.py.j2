@@ -1,0 +1,25 @@
+{% include "open_table.py.j2" %}
+
+# Upsert by a stable key. Matched rows are updated; missing keys are inserted.
+# Incoming rows must contain the key column and fields compatible with the target schema.
+incoming = [
+    {
+        "id": 1001,
+        "stage_name": "Ada Night",
+        "bio": "Updated biography text.",
+        "genres": ["Drama", "Thriller", "Independent"],
+        "active": True,
+        "embedding": [0.1, -0.2, 0.0, *([0.05] * 61)],
+    }
+]
+
+result = (
+    table.merge_insert("id")
+    .when_matched_update_all()
+    .when_not_matched_insert_all()
+    .execute(incoming)
+)
+print(result)
+
+# Writes create a new version even when few rows change. Optimize later when fragmentation,
+# deleted-row cleanup, or index-update coverage justifies the maintenance work.

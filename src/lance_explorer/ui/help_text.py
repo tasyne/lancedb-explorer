@@ -57,6 +57,10 @@ HELP: dict[str, str] = {
         "Loads only the selected columns and row limit. Sampling is explicit so Streamlit reruns "
         "do not repeat the read."
     ),
+    "insert_data": (
+        "Read-only guidance for add, merge/upsert, pandas, Pydantic validation, and binary/blob "
+        "write patterns. No data is changed from this page."
+    ),
     "filter_query": (
         "SQL WHERE only. Examples: `birth_date >= DATE '1985-04-02'`; `active = true`; "
         "`award_count BETWEEN 3 AND 10`; `array_has(tags, 'vip')`; `stage_name LIKE 'Ann%'`."
@@ -105,8 +109,8 @@ HELP: dict[str, str] = {
         "This increases index size."
     ),
     "fts_tokenizer": (
-        "Controls how text becomes search terms. ICU handles mixed-language text; Jieba uses "
-        "packaged Mandarin dictionary files."
+        "Controls how text becomes search terms. ICU is built in; Jieba and Lindera use packaged "
+        "model files under LANCE_LANGUAGE_MODEL_HOME."
     ),
     "fts_language": (
         "Language affects stemming and stop-word removal. It is separate from CJK tokenization."
