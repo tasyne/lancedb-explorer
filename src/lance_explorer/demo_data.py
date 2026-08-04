@@ -9,10 +9,10 @@ from typing import Any
 import lancedb
 import pyarrow as pa
 from faker import Faker
-from lance import blob_array, blob_field
-from lancedb.index import FTS, IvfFlat
 
+from lance_explorer.compat import lance_blob_v2_available, lancedb_supports_fts_icu
 from lance_explorer.config import lancedb_storage_options_from_env
+from lance_explorer.index_compat import create_table_index
 from lance_explorer.index_registry import fts_options_for_preset
 from lance_explorer.paths import has_uri_scheme, split_table_uri
 
@@ -59,31 +59,60 @@ DEMO_BINARY_COLUMNS = (
     "headshot_full_bytes",
 )
 
-DEMO_SCHEMA = pa.schema(
-    [
-        pa.field("id", pa.int64()),
-        pa.field("legal_name", pa.string()),
-        pa.field("stage_name", pa.string()),
-        pa.field("locale", pa.string()),
-        pa.field("bio", pa.string()),
-        pa.field("agency_email", pa.string()),
-        pa.field("phone_number", pa.string()),
-        pa.field("birth_date", pa.date32()),
-        pa.field("home_city", pa.string()),
-        pa.field("country", pa.string()),
-        pa.field("genre", pa.list_(pa.string())),
-        pa.field("award_count", pa.int16()),
-        pa.field("popularity_score", pa.float32()),
-        pa.field("active", pa.bool_()),
-        pa.field("embedding", pa.list_(pa.float32(), DEMO_EMBEDDING_DIM)),
-        pa.field("headshot_filename", pa.string()),
-        pa.field("headshot_mime", pa.string()),
-        pa.field("headshot_thumbnail_bytes", pa.binary()),
-        blob_field("headshot_full_bytes"),
-    ]
-)
+
+try:
+    from lance import blob_array as _lance_blob_array
+    from lance import blob_field as _lance_blob_field
+except Exception:
+    _lance_blob_array = None
+    _lance_blob_field = None
+
+
+def supports_blob_v2() -> bool:
+    """Return whether demo data can use Lance Blob v2 storage."""
+
+    return (
+        lance_blob_v2_available()
+        and _lance_blob_array is not None
+        and _lance_blob_field is not None
+    )
+
+
+def demo_schema(*, use_blob_v2: bool | None = None) -> pa.Schema:
+    """Return the demo schema with Blob v2 or Arrow binary full-image storage."""
+
+    use_blob = supports_blob_v2() if use_blob_v2 is None else use_blob_v2
+    full_image_field = (
+        _lance_blob_field("headshot_full_bytes")
+        if use_blob and _lance_blob_field is not None
+        else pa.field("headshot_full_bytes", pa.binary())
+    )
+    return pa.schema(
+        [
+            pa.field("id", pa.int64()),
+            pa.field("legal_name", pa.string()),
+            pa.field("stage_name", pa.string()),
+            pa.field("locale", pa.string()),
+            pa.field("bio", pa.string()),
+            pa.field("agency_email", pa.string()),
+            pa.field("phone_number", pa.string()),
+            pa.field("birth_date", pa.date32()),
+            pa.field("home_city", pa.string()),
+            pa.field("country", pa.string()),
+            pa.field("genre", pa.list_(pa.string())),
+            pa.field("award_count", pa.int16()),
+            pa.field("popularity_score", pa.float32()),
+            pa.field("active", pa.bool_()),
+            pa.field("embedding", pa.list_(pa.float32(), DEMO_EMBEDDING_DIM)),
+            pa.field("headshot_filename", pa.string()),
+            pa.field("headshot_mime", pa.string()),
+            pa.field("headshot_thumbnail_bytes", pa.binary()),
+            full_image_field,
+        ]
+    )
+
+
 DEMO_VERSIONED_FIELD = pa.field("publicity_risk", pa.string())
-DEMO_VERSIONED_SCHEMA = DEMO_SCHEMA.append(DEMO_VERSIONED_FIELD)
 
 _GENRES = [
     "action",
@@ -121,6 +150,9 @@ class DemoTableResult:
     row_count: int
     version_count: int
     locale: str
+    blob_v2_enabled: bool = False
+    fts_preset: str = "MULTILINGUAL"
+    fts_base_tokenizer: str = "icu"
 
 
 def resolve_faker_locale(value: str) -> str:
@@ -228,16 +260,21 @@ def _chunk_sizes(total: int, chunks: int) -> list[int]:
     return [base + (1 if index < remainder else 0) for index in range(chunks)]
 
 
-def _base_schema_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {field.name: row[field.name] for field in DEMO_SCHEMA}
+def _base_schema_row(row: dict[str, Any], schema: pa.Schema) -> dict[str, Any]:
+    return {field.name: row[field.name] for field in schema}
 
 
-def _arrow_table_from_rows(rows: list[dict[str, Any]], schema: pa.Schema) -> pa.Table:
+def _arrow_table_from_rows(
+    rows: list[dict[str, Any]],
+    schema: pa.Schema,
+    *,
+    use_blob_v2: bool,
+) -> pa.Table:
     arrays = []
     for field in schema:
         values = [row.get(field.name) for row in rows]
-        if field.name == "headshot_full_bytes":
-            arrays.append(blob_array(values))
+        if field.name == "headshot_full_bytes" and use_blob_v2 and _lance_blob_array is not None:
+            arrays.append(_lance_blob_array(values))
         else:
             arrays.append(pa.array(values, type=field.type))
     return pa.Table.from_arrays(arrays, schema=schema)
@@ -246,23 +283,36 @@ def _arrow_table_from_rows(rows: list[dict[str, Any]], schema: pa.Schema) -> pa.
 def _create_demo_vector_index(table: Any, row_count: int) -> None:
     """Create the demo table's default nearest-neighbor index."""
 
-    table.create_index(
-        "embedding",
-        config=IvfFlat(num_partitions=max(1, min(4, row_count))),
+    create_table_index(
+        table,
+        column="embedding",
+        index_type="IVF_FLAT",
+        config_options={"num_partitions": max(1, min(4, row_count))},
         name=DEMO_VECTOR_INDEX_NAME,
         replace=True,
     )
 
 
-def _create_demo_fts_index(table: Any) -> None:
-    """Create the demo table's multilingual full-text index."""
+def _create_demo_fts_index(table: Any) -> tuple[str, dict[str, object]]:
+    """Create the demo table's default full-text index for this LanceDB version."""
 
-    table.create_index(
-        "bio",
-        config=FTS(**fts_options_for_preset("MULTILINGUAL")),
+    fts_preset, fts_options = demo_fts_index_options()
+    create_table_index(
+        table,
+        column="bio",
+        index_type="FTS",
+        config_options=fts_options,
         name=DEMO_FTS_INDEX_NAME,
         replace=True,
     )
+    return fts_preset, fts_options
+
+
+def demo_fts_index_options() -> tuple[str, dict[str, object]]:
+    """Return FTS options supported by the installed LanceDB version."""
+
+    preset = "MULTILINGUAL" if lancedb_supports_fts_icu() else "ENGLISH"
+    return preset, fts_options_for_preset(preset)
 
 
 def create_demo_table(
@@ -295,31 +345,44 @@ def create_demo_table(
     row_chunk_count = max(1, version_count - 1)
     chunk_sizes = _chunk_sizes(row_count, row_chunk_count)
     first_chunk_size = chunk_sizes[0]
+    use_blob_v2 = supports_blob_v2()
+    base_schema = demo_schema(use_blob_v2=use_blob_v2)
+    versioned_schema = base_schema.append(DEMO_VERSIONED_FIELD)
     data = _arrow_table_from_rows(
-        [_base_schema_row(row) for row in rows[:first_chunk_size]],
-        DEMO_SCHEMA,
+        [_base_schema_row(row, base_schema) for row in rows[:first_chunk_size]],
+        base_schema,
+        use_blob_v2=use_blob_v2,
     )
     db = lancedb.connect(
         location.database_uri,
         storage_options=lancedb_storage_options_from_env() or None,
     )
+    create_options: dict[str, Any] = {}
+    if use_blob_v2:
+        create_options["data_storage_version"] = "2.2"
     table = db.create_table(
         location.table_name,
         data=data,
-        schema=DEMO_SCHEMA,
+        schema=base_schema,
         mode="overwrite" if overwrite else "create",
-        data_storage_version="2.2",
+        **create_options,
     )
     # Adding this field as a second write creates an explicit schema change for demos.
     table.add_columns(DEMO_VERSIONED_FIELD)
 
     offset = first_chunk_size
     for chunk_size in chunk_sizes[1:]:
-        table.add(_arrow_table_from_rows(rows[offset : offset + chunk_size], DEMO_VERSIONED_SCHEMA))
+        table.add(
+            _arrow_table_from_rows(
+                rows[offset : offset + chunk_size],
+                versioned_schema,
+                use_blob_v2=use_blob_v2,
+            )
+        )
         offset += chunk_size
 
     _create_demo_vector_index(table, row_count)
-    _create_demo_fts_index(table)
+    fts_preset, fts_options = _create_demo_fts_index(table)
 
     return DemoTableResult(
         table_uri=location.table_uri,
@@ -328,4 +391,7 @@ def create_demo_table(
         row_count=row_count,
         version_count=version_count,
         locale=resolved_locale,
+        blob_v2_enabled=use_blob_v2,
+        fts_preset=fts_preset,
+        fts_base_tokenizer=str(fts_options.get("base_tokenizer", "")),
     )

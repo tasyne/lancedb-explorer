@@ -105,12 +105,13 @@ class TemplateRenderer:
     def render(self, template_id: str, context: Mapping[str, Any]) -> str:
         """Render a template after validating required and secret-free context."""
 
-        self._validate_safe_context(context)
+        render_context = {**self._runtime_context(), **dict(context)}
+        self._validate_safe_context(render_context)
         spec = self.registry.get(template_id)
-        missing = [name for name in spec.required_context if name not in context]
+        missing = [name for name in spec.required_context if name not in render_context]
         if missing:
             raise ValueError(f"Missing template context: {', '.join(missing)}")
-        return self.environment.get_template(spec.file).render(**dict(context)).rstrip() + "\n"
+        return self.environment.get_template(spec.file).render(**render_context).rstrip() + "\n"
 
     @staticmethod
     def _validate_safe_context(context: Mapping[str, Any]) -> None:
@@ -121,3 +122,13 @@ class TemplateRenderer:
             raise ValueError(
                 "Secret-bearing values cannot be passed to code templates: " + ", ".join(unsafe)
             )
+
+    @staticmethod
+    def _runtime_context() -> dict[str, str]:
+        return {
+            "aws_endpoint": os.getenv("AWS_ENDPOINT") or os.getenv("AWS_ENDPOINT_URL") or "",
+            "aws_default_region": os.getenv("AWS_DEFAULT_REGION")
+            or os.getenv("AWS_REGION")
+            or "",
+            "allow_http": os.getenv("ALLOW_HTTP", "false"),
+        }

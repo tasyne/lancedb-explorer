@@ -4,10 +4,14 @@ import lancedb
 from upath import UPath
 
 # AWS credentials are resolved by the normal environment/provider chain.
-# Optional S3-compatible settings remain placeholders and never include values.
+# Non-secret storage defaults are copied from the lance-explorer runtime environment.
+AWS_ENDPOINT = os.getenv("AWS_ENDPOINT", {{ aws_endpoint | pyrepr }})
+AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION", {{ aws_default_region | pyrepr }})
+ALLOW_HTTP = os.getenv("ALLOW_HTTP", {{ allow_http | pyrepr }})
+
 storage_options = {
-    "endpoint": os.getenv("AWS_ENDPOINT", ""),
-    "region": os.getenv("AWS_DEFAULT_REGION", ""),
-    "allow_http": os.getenv("ALLOW_HTTP", "false"),
+    "endpoint": AWS_ENDPOINT,
+    "region": AWS_DEFAULT_REGION,
+    "allow_http": ALLOW_HTTP,
 }
 storage_options = {key: value for key, value in storage_options.items() if value}

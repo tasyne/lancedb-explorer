@@ -7,6 +7,8 @@ from lance import blob_array, blob_field
 
 # Match these fields to your table schema. Blob v2 columns require a table created with
 # data_storage_version="2.2" or newer.
+# LanceDB 0.33.x compatibility: use pa.binary() for headshot_full_bytes too, call
+# pa.array([full_image_bytes], type=pa.binary()), and omit data_storage_version="2.2".
 thumbnail_bytes = Path("headshot_thumbnail.png").read_bytes()
 full_image_bytes = Path("headshot_full.png").read_bytes()
 

@@ -2,7 +2,7 @@
 
 **Status:** Implemented MVP with focused local validation.  
 **Runtime target:** Python 3.12 through 3.13.  
-**Primary stack:** Streamlit, LanceDB, PyArrow, pandas, Universal Pathlib, s3fs, Jinja, Faker.
+**Primary stack:** Streamlit, LanceDB 0.33.x through 0.34.x, PyArrow, pandas, Universal Pathlib, s3fs, Jinja, Faker.
 
 ## Purpose
 
@@ -17,6 +17,7 @@ The app is deliberately lightweight:
 - no model download, embedding generation, or reranking pipeline;
 - no unbounded query, preview, or comparison workflow;
 - no mutation triggered merely by Streamlit rerendering.
+- no hard dependency on Blob v2 when LanceDB 0.33.x is the newest installable package on an older OS.
 
 ## Current Capabilities
 
@@ -92,7 +93,8 @@ The app is deliberately lightweight:
 - Demo rows include a 64-dimensional `embedding` vector, `embedding_vector_idx`, and
   `bio_multilingual_fts_idx`.
 - Demo rows include bundled PNG headshots: thumbnails use inline Arrow `binary`, and full images
-  use Lance Blob v2 columns created with file format `data_storage_version="2.2"`.
+  use Lance Blob v2 columns created with file format `data_storage_version="2.2"` when available,
+  falling back to Arrow `binary` on LanceDB 0.33.x.
 - Multiple Lance versions are created by default so schema/history/diff features have data to demonstrate.
 
 ## Architecture
