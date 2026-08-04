@@ -12,9 +12,8 @@ import pyarrow as pa
 from lancedb.rerankers import RRFReranker
 
 from lance_explorer.config import lancedb_storage_options_from_env
-from lance_explorer.index_registry import fts_uses_packaged_model, get_index_definition
+from lance_explorer.index_compat import create_table_index
 from lance_explorer.language_models import (
-    configure_packaged_language_model,
     ensure_packaged_language_model_home,
 )
 from lance_explorer.paths import TableLocation, split_table_uri
@@ -382,13 +381,15 @@ class LanceRepository:
     ) -> dict[str, Any]:
         """Create an index using registry-owned LanceDB configuration classes."""
 
-        definition = get_index_definition(index_type)
-        options = config_options or {}
-        if index_type == "FTS" and fts_uses_packaged_model(options):
-            configure_packaged_language_model(str(options.get("base_tokenizer", "")))
-        config = definition.create_config(**options)
         table = self.open_table(table_uri)
-        table.create_index(column, config=config, name=name or None, replace=replace)
+        create_table_index(
+            table,
+            column=column,
+            index_type=index_type,
+            name=name,
+            replace=replace,
+            config_options=config_options,
+        )
         return {"status": "created", "column": column, "index_type": index_type, "name": name}
 
     def drop_index(self, table_uri: str, name: str) -> dict[str, Any]:

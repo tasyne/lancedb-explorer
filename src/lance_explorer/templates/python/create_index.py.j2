@@ -1,4 +1,6 @@
 {% include "open_table.py.j2" %}
+import inspect
+
 {% if needs_language_model_home %}from pathlib import Path
 
 from lance_explorer.language_models import configure_packaged_language_model
@@ -24,9 +26,72 @@ configure_packaged_language_model({{ config_options.get("base_tokenizer") | pyre
 
 {% endif %}
 config = {{ config_class }}(**{{ config_options | pyrepr }})
-table.create_index(
-    {{ column | pyrepr }},
-    config=config,
-    name={{ index_name | pyrepr }},
-    replace={{ replace }},
-)
+index_type = {{ index_type | pyrepr }}
+config_options = {{ config_options | pyrepr }}
+
+
+def _call_supported(method, *args, **kwargs):
+    signature = inspect.signature(method)
+    if any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()):
+        return method(*args, **kwargs)
+    return method(*args, **{key: value for key, value in kwargs.items() if key in signature.parameters})
+
+
+def _supports_unified_create_index(table):
+    return "config" in inspect.signature(table.create_index).parameters
+
+
+if _supports_unified_create_index(table):
+    table.create_index(
+        {{ column | pyrepr }},
+        config=config,
+        name={{ index_name | pyrepr }},
+        replace={{ replace }},
+    )
+elif index_type in {"BTREE", "BITMAP", "LABEL_LIST"}:
+    _call_supported(
+        table.create_scalar_index,
+        {{ column | pyrepr }},
+        index_type=index_type,
+        name={{ index_name | pyrepr }},
+        replace={{ replace }},
+    )
+elif index_type == "FTS":
+    _call_supported(
+        table.create_fts_index,
+        {{ column | pyrepr }},
+        **config_options,
+        name={{ index_name | pyrepr }},
+        replace={{ replace }},
+    )
+elif index_type in {
+    "IVF_FLAT",
+    "IVF_SQ",
+    "IVF_PQ",
+    "IVF_RQ",
+    "IVF_HNSW_SQ",
+    "IVF_HNSW_PQ",
+    "IVF_HNSW_FLAT",
+}:
+    _call_supported(
+        table.create_index,
+        metric=config_options.get("distance_type", "l2"),
+        vector_column_name={{ column | pyrepr }},
+        index_type=index_type,
+        name={{ index_name | pyrepr }},
+        replace={{ replace }},
+        num_partitions=config_options.get("num_partitions"),
+        num_sub_vectors=config_options.get("num_sub_vectors"),
+        num_bits=config_options.get("num_bits", 8),
+        max_iterations=config_options.get("max_iterations", 50),
+        sample_rate=config_options.get("sample_rate", 256),
+        m=config_options.get("m", 20),
+        ef_construction=config_options.get("ef_construction", 300),
+        target_partition_size=config_options.get("target_partition_size"),
+        accelerator=config_options.get("accelerator"),
+    )
+else:
+    raise RuntimeError(
+        f"{index_type} requires LanceDB's unified create_index(config=...) API. "
+        "Install LanceDB 0.34.0 or newer, or choose a legacy-compatible index type."
+    )

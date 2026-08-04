@@ -8,3 +8,6 @@ wheelhouse/
 docs_mirrors/
 *.py[cod]
 venv/
+.vscode/
+venv*
+.docs*

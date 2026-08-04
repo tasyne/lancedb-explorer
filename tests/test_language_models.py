@@ -4,7 +4,6 @@ from io import BytesIO
 
 from lance_explorer.language_models import (
     configure_packaged_language_model,
-    ensure_packaged_language_model_home,
     external_language_models,
     language_model_archive_bytes,
     language_model_for_tokenizer,

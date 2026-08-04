@@ -83,13 +83,23 @@ def run(argv: Sequence[str] | None = None) -> int:
         except Exception as exc:
             print(f"Unable to create demo data: {exc}", file=sys.stderr)
             return 1
+        binary_note = (
+            "Full headshots use Lance Blob v2 storage."
+            if result.blob_v2_enabled
+            else (
+                "Full headshots use Arrow binary fallback because Lance Blob v2 is unavailable "
+                "in this environment."
+            )
+        )
         print(
             "Created demo Lance table "
             f"{result.table_uri} with {result.row_count} rows across "
             f"{result.version_count} versions using Faker locale {result.locale}. "
             f"Included image binary/blob columns {', '.join(DEMO_BINARY_COLUMNS)}. "
+            f"{binary_note} "
             f"Created indexes {DEMO_VECTOR_INDEX_NAME} on embedding and "
-            f"{DEMO_FTS_INDEX_NAME} on bio."
+            f"{DEMO_FTS_INDEX_NAME} on bio using the {result.fts_preset} FTS preset "
+            f"({result.fts_base_tokenizer} tokenizer)."
         )
         return 0
 

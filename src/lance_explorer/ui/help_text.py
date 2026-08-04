@@ -109,8 +109,8 @@ HELP: dict[str, str] = {
         "This increases index size."
     ),
     "fts_tokenizer": (
-        "Controls how text becomes search terms. ICU is built in; Jieba and Lindera use packaged "
-        "model files under LANCE_LANGUAGE_MODEL_HOME."
+        "Controls how text becomes search terms. ICU is built in; Jieba can use packaged files; "
+        "Lindera requires external model files."
     ),
     "fts_language": (
         "Language affects stemming and stop-word removal. It is separate from CJK tokenization."

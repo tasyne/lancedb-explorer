@@ -63,7 +63,7 @@ templates:
     file: create_index.py.j2
     title: Create an index
     language: python
-    required_context: [table_uri, column, config_class, config_options, needs_language_model_home, index_name, replace]
+    required_context: [table_uri, column, index_type, config_class, config_options, needs_language_model_home, index_name, replace]
   drop_index:
     file: drop_index.py.j2
     title: Drop an index

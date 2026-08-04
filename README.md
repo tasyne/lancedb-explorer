@@ -7,6 +7,8 @@ For design details, see [PLAN.md](PLAN.md).
 ## Install
 
 Requires Python `>=3.12,<3.14`.
+LanceDB `>=0.34.0` is recommended. LanceDB `0.33.x` can run with reduced binary support on
+systems that cannot install newer LanceDB wheels.
 
 ```bash
 python -m venv .venv
@@ -21,6 +23,22 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
 ```
+
+## LanceDB Compatibility
+
+Lance Explorer supports LanceDB `0.33.x`, but `0.34.0+` is the preferred target. This matters
+because generated code mirrors the installed SDK's public API where possible.
+
+| Area | LanceDB 0.33.x | LanceDB 0.34.0+ |
+| --- | --- | --- |
+| Index creation API | Uses older public helpers such as `create_scalar_index`, `create_fts_index`, and legacy vector `create_index(...)` arguments. | Supports unified `create_index(column, config=...)` snippets. |
+| Vector index choices | Limited to legacy public vector index types exposed by the installed SDK. | Newer config classes can be used directly when available. |
+| Binary demo data | Full headshots fall back to Arrow `binary`. | Full headshots use Lance Blob v2 when the `lance` helpers are available. |
+| Demo FTS index | Uses the English/simple tokenizer preset. | Uses the multilingual ICU preset. |
+| Code exports | Include compatibility fallbacks for index creation and avoid newer-only version arguments where practical. | Prefer the newer config-style API while keeping copied snippets portable. |
+
+The app displays a warning when LanceDB is older than `0.34.0`. Older deployments can still be
+useful, but some LanceDB capabilities are genuinely unavailable rather than hidden by the UI.
 
 ## Run
 
@@ -89,8 +107,9 @@ depending on sub-vector settings.
 
 Demo headshots are PNG fixtures derived from Random User Generator portrait URLs and bundled under
 `src/lance_explorer/demo_assets/headshots`. The demo stores thumbnails as inline Arrow `binary`
-values and full images as Lance Blob v2 values, so the UI can show the difference between small
-row-local binary payloads and larger blob-backed payloads.
+values. With LanceDB `>=0.34.0`, full images use Lance Blob v2 values so the UI can show the
+difference between small row-local binary payloads and larger blob-backed payloads. With LanceDB
+`0.33.x`, full images fall back to Arrow `binary` so demo creation can still proceed.
 
 ## Using the App
 
@@ -122,7 +141,10 @@ Windows PowerShell:
 .\scripts\mirror_docs.ps1
 ```
 
-Requirements: GNU `wget`; the shell script also needs `zip`. The scripts are intentionally simple `wget --mirror` plus zip wrappers.
+Requirements: GNU `wget`; the shell script also needs `zip`. The scripts seed `wget` from
+`llms.txt` and sitemap URLs, then mirror page requisites across an explicit allowlist that includes
+the docs host plus CDN assets such as `mintcdn.com`, `fonts.googleapis.com`, and
+`fonts.gstatic.com`, plus CloudFront-hosted Font Awesome assets used by the docs site.
 
 To store the zips elsewhere:
 
@@ -135,6 +157,8 @@ If links inside the mirrored docs fail, use the `Offline Index`. Maximizing the 
 ## Configuration
 
 LanceDB and `s3fs` read credentials from the normal environment/provider chain. The app does not store or render secret values in generated code.
+Generated code does include non-secret storage settings from the running environment:
+`AWS_ENDPOINT`, `AWS_DEFAULT_REGION`, and `ALLOW_HTTP`.
 
 Common environment variables:
 

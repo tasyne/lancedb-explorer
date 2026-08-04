@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from lance_explorer.config import AppConfig
+from lance_explorer.index_compat import index_type_supported_by_installed_lancedb
 from lance_explorer.index_registry import (
     FTS_BASE_TOKENIZERS,
     FTS_LANGUAGES,
@@ -512,7 +513,11 @@ def render(config: AppConfig) -> None:
     st.caption(
         f"Detected Arrow type: `{field.type}`. Available index types are filtered by this type."
     )
-    definitions = compatible_index_definitions(field.type)
+    definitions = [
+        definition
+        for definition in compatible_index_definitions(field.type)
+        if index_type_supported_by_installed_lancedb(definition.key)
+    ]
     if not definitions:
         st.warning(f"No registered index type supports {field.type}.")
     else:
@@ -547,6 +552,7 @@ def render(config: AppConfig) -> None:
             {
                 "table_uri": table_uri,
                 "column": selected_column,
+                "index_type": selected_type,
                 "config_class": definition.class_name,
                 "config_options": config_options,
                 "needs_language_model_home": fts_uses_packaged_model(config_options),

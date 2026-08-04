@@ -5,12 +5,30 @@ import pytest
 from lance_explorer.codegen import TemplateRenderer
 
 
-def test_connection_template_uses_placeholders_not_credentials() -> None:
+def test_connection_template_uses_runtime_storage_values_not_credentials(monkeypatch) -> None:
+    monkeypatch.setenv("AWS_ENDPOINT", "http://minio.local:9000")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-west-2")
+    monkeypatch.setenv("ALLOW_HTTP", "true")
+
     code = TemplateRenderer().render("connect", {"database_uri": "s3://bucket/database"})
+
     assert "UPath('s3://bucket/database')" in code
-    assert "AWS_ENDPOINT" in code
+    assert "import os" in code
+    assert 'AWS_ENDPOINT = os.getenv("AWS_ENDPOINT", \'http://minio.local:9000\')' in code
+    assert 'AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION", \'us-west-2\')' in code
+    assert 'ALLOW_HTTP = os.getenv("ALLOW_HTTP", \'true\')' in code
+    assert '"endpoint": AWS_ENDPOINT' in code
     assert "AWS_ACCESS_KEY_ID" not in code
     assert "AWS_SECRET_ACCESS_KEY" not in code
+
+
+def test_connection_template_can_fallback_to_aws_region(monkeypatch) -> None:
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    monkeypatch.setenv("AWS_REGION", "eu-central-1")
+
+    code = TemplateRenderer().render("connect", {"database_uri": "s3://bucket/database"})
+
+    assert 'AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION", \'eu-central-1\')' in code
 
 
 def test_index_template_renders_runtime_configuration() -> None:
@@ -19,6 +37,7 @@ def test_index_template_renders_runtime_configuration() -> None:
         {
             "table_uri": "/tmp/db/items.lance",
             "column": "text",
+            "index_type": "FTS",
             "config_class": "FTS",
             "config_options": {"with_position": True},
             "needs_language_model_home": False,
@@ -37,6 +56,7 @@ def test_jieba_index_template_configures_packaged_language_models() -> None:
         {
             "table_uri": "/tmp/db/items.lance",
             "column": "text",
+            "index_type": "FTS",
             "config_class": "FTS",
             "config_options": {"base_tokenizer": "jieba/default"},
             "needs_language_model_home": True,
@@ -58,6 +78,7 @@ def test_lindera_index_template_does_not_assume_packaged_models() -> None:
         {
             "table_uri": "/tmp/db/items.lance",
             "column": "text_ja",
+            "index_type": "FTS",
             "config_class": "FTS",
             "config_options": {"base_tokenizer": "lindera/ipadic"},
             "needs_language_model_home": False,
@@ -77,6 +98,7 @@ def test_vector_index_template_renders_vector_configuration() -> None:
         {
             "table_uri": "/tmp/db/items.lance",
             "column": "embedding",
+            "index_type": "IVF_HNSW_SQ",
             "config_class": "IvfHnswSq",
             "config_options": {
                 "distance_type": "cosine",
@@ -312,6 +334,7 @@ def test_all_python_templates_render_as_valid_python() -> None:
         "create_index": {
             "table_uri": "/tmp/db/items.lance",
             "column": "id",
+            "index_type": "BTREE",
             "config_class": "BTree",
             "config_options": {},
             "needs_language_model_home": False,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from lance_explorer.compat import lancedb_compatibility_warning
 from lance_explorer.config import AppConfig
 from lance_explorer.language_models import ensure_packaged_language_model_home
 from lance_explorer.paths import split_table_uri
@@ -172,6 +173,8 @@ def main() -> None:
     st.set_option("client.toolbarMode", "viewer")
     st.set_page_config(page_title="Lance Explorer", page_icon="🗂️", layout="wide")
     _install_global_css()
+    if warning := lancedb_compatibility_warning():
+        st.warning(warning, icon=":material/warning:")
     config = AppConfig.from_env()
     initialize_state(config)
 
