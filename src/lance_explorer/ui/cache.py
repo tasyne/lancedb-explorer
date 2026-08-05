@@ -50,6 +50,14 @@ def cached_versions(table_uri: str, generation: int) -> list[dict[str, Any]]:
 
 
 @st.cache_data(ttl=20, max_entries=512, show_spinner=False)
+def cached_tags(table_uri: str, generation: int) -> list[dict[str, Any]]:
+    """Cache table version tags."""
+
+    del generation
+    return LanceRepository().list_tags(table_uri)
+
+
+@st.cache_data(ttl=20, max_entries=512, show_spinner=False)
 def cached_schema_rows(
     table_uri: str,
     version: int | None,

@@ -22,7 +22,11 @@ from lance_explorer.ui.components.code_export import show_code_export
 from lance_explorer.ui.components.common import table_uri_control, template_directory
 from lance_explorer.ui.components.language_models import show_language_model_downloads
 from lance_explorer.ui.help_text import help_text
-from lance_explorer.ui.state import bump_generation, generation_for
+from lance_explorer.ui.state import (
+    bump_generation,
+    generation_for,
+    selected_table_checkout_reference,
+)
 
 _PQ_INDEX_TYPES = {"IVF_PQ", "IVF_HNSW_PQ", "HNSW_PQ"}
 _RQ_INDEX_TYPES = {"IVF_RQ"}
@@ -472,30 +476,24 @@ def _vector_config_controls(index_type: str, row_count: int, data_type) -> dict[
     return config_options
 
 
-def render(config: AppConfig) -> None:
-    """Render index inspection, creation, and removal workflows."""
-
-    st.title("Indexes")
-    _show_status_once()
-    table_uri = table_uri_control(key="index-table-open")
-    if not table_uri:
-        return
-
-    generation = generation_for(table_uri)
-    repository = LanceRepository(config.max_query_rows)
-    try:
-        snapshot = cached_snapshot(table_uri, None, generation)
-        schema = repository.get_schema(table_uri)
-    except Exception as exc:
-        st.error(str(exc))
-        return
+def _render_existing_indexes_tab(indexes: list[dict[str, object]]) -> None:
+    """Show current table indexes and downloadable FTS model assets."""
 
     st.subheader("Existing indexes", help=help_text("existing_indexes"))
-    indexes = snapshot.get("indexes", [])
     st.dataframe(pd.DataFrame(indexes), width="stretch")
 
     st.subheader("FTS language models")
     show_language_model_downloads(expanded=True, key_prefix="indexes-fts")
+
+
+def _render_create_index_tab(
+    config: AppConfig,
+    repository: LanceRepository,
+    table_uri: str,
+    schema,
+    snapshot: dict[str, object],
+) -> None:
+    """Render index creation controls and generated Python for the selected column."""
 
     st.subheader("Create index", help=help_text("create_index"))
     with st.popover("Index type guide", icon=":material/info:"):
@@ -520,100 +518,142 @@ def render(config: AppConfig) -> None:
     ]
     if not definitions:
         st.warning(f"No registered index type supports {field.type}.")
-    else:
-        labels = {
-            definition.key: f"{definition.label} - {definition.description}"
-            for definition in definitions
-        }
-        selected_type = st.selectbox(
-            "Index type",
-            list(labels),
-            format_func=labels.get,
-            help=help_text("create_index"),
-        )
-        index_name = st.text_input("Index name (optional)")
-        replace = st.checkbox(
-            "Replace an index with the same name",
-            help=help_text("replace_index"),
-        )
-        definition = next(item for item in definitions if item.key == selected_type)
-        config_options: dict[str, object] = {}
-        if selected_type == "FTS":
-            config_options = _fts_config_controls()
-        elif definition.category == "vector":
-            config_options = _vector_config_controls(
-                selected_type,
-                int(snapshot.get("row_count") or 0),
-                field.type,
-            )
+        return
 
-        show_code_export(
-            "create_index",
-            {
-                "table_uri": table_uri,
-                "column": selected_column,
-                "index_type": selected_type,
-                "config_class": definition.class_name,
-                "config_options": config_options,
-                "needs_language_model_home": fts_uses_packaged_model(config_options),
-                "index_name": index_name.strip() or None,
-                "replace": replace,
-            },
-            template_directory=template_directory(config),
+    labels = {
+        definition.key: f"{definition.label} - {definition.description}"
+        for definition in definitions
+    }
+    selected_type = st.selectbox(
+        "Index type",
+        list(labels),
+        format_func=labels.get,
+        help=help_text("create_index"),
+    )
+    index_name = st.text_input("Index name (optional)")
+    replace = st.checkbox(
+        "Replace an index with the same name",
+        help=help_text("replace_index"),
+    )
+    definition = next(item for item in definitions if item.key == selected_type)
+    config_options: dict[str, object] = {}
+    if selected_type == "FTS":
+        config_options = _fts_config_controls()
+    elif definition.category == "vector":
+        config_options = _vector_config_controls(
+            selected_type,
+            int(snapshot.get("row_count") or 0),
+            field.type,
         )
 
-        with st.form("create-index"):
-            create_confirmation = st.checkbox(
-                "I understand this will modify the selected table metadata."
+    show_code_export(
+        "create_index",
+        {
+            "table_uri": table_uri,
+            "column": selected_column,
+            "index_type": selected_type,
+            "config_class": definition.class_name,
+            "config_options": config_options,
+            "needs_language_model_home": fts_uses_packaged_model(config_options),
+            "index_name": index_name.strip() or None,
+            "replace": replace,
+        },
+        template_directory=template_directory(config),
+    )
+
+    with st.form("create-index"):
+        create_confirmation = st.checkbox(
+            "I understand this will modify the selected table metadata."
+        )
+        create = st.form_submit_button("Create index")
+    if create:
+        if not create_confirmation:
+            st.error("Confirm that you want to create this index.")
+            return
+        try:
+            st.session_state.operation_results["create_index"] = repository.create_index(
+                table_uri,
+                column=selected_column,
+                index_type=selected_type,
+                name=index_name.strip() or None,
+                replace=replace,
+                config_options=config_options,
             )
-            create = st.form_submit_button("Create index")
-        if create:
-            if not create_confirmation:
-                st.error("Confirm that you want to create this index.")
-            else:
-                try:
-                    st.session_state.operation_results["create_index"] = repository.create_index(
-                        table_uri,
-                        column=selected_column,
-                        index_type=selected_type,
-                        name=index_name.strip() or None,
-                        replace=replace,
-                        config_options=config_options,
-                    )
-                    _refresh_after_mutation(table_uri)
-                    st.session_state["index_status"] = "Index created"
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
+            _refresh_after_mutation(table_uri)
+            st.session_state["index_status"] = "Index created"
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+
+
+def _render_drop_index_tab(
+    config: AppConfig,
+    repository: LanceRepository,
+    table_uri: str,
+    indexes: list[dict[str, object]],
+) -> None:
+    """Render guarded index deletion controls."""
 
     st.subheader("Drop index", help=help_text("drop_index"))
     index_names = [str(item.get("name", "")) for item in indexes if item.get("name")]
     if not index_names:
         st.caption("No named indexes are available.")
-    else:
-        drop_name = st.selectbox("Index", index_names)
-        show_code_export(
-            "drop_index",
-            {"table_uri": table_uri, "index_name": drop_name},
-            template_directory=template_directory(config),
-        )
-        with st.form("drop-index"):
-            st.caption("Type the exact index name to confirm deletion.")
-            st.code(drop_name, language="text")
-            drop_confirmation = st.text_input("Index name")
-            drop = st.form_submit_button("Drop index")
-        if drop:
-            if drop_confirmation != drop_name:
-                st.error("The index name does not match.")
-            else:
-                try:
-                    st.session_state.operation_results["drop_index"] = repository.drop_index(
-                        table_uri, drop_name
-                    )
-                    _refresh_after_mutation(table_uri)
-                    st.session_state["index_status"] = (
-                        "Index dropped. Optimize later to remove unreferenced files."
-                    )
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
+        return
+
+    drop_name = st.selectbox("Index", index_names)
+    show_code_export(
+        "drop_index",
+        {"table_uri": table_uri, "index_name": drop_name},
+        template_directory=template_directory(config),
+    )
+    with st.form("drop-index"):
+        st.caption("Type the exact index name to confirm deletion.")
+        st.code(drop_name, language="text")
+        drop_confirmation = st.text_input("Index name")
+        drop = st.form_submit_button("Drop index")
+    if drop:
+        if drop_confirmation != drop_name:
+            st.error("The index name does not match.")
+            return
+        try:
+            st.session_state.operation_results["drop_index"] = repository.drop_index(
+                table_uri, drop_name
+            )
+            _refresh_after_mutation(table_uri)
+            st.session_state["index_status"] = (
+                "Index dropped. Optimize later to remove unreferenced files."
+            )
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+
+
+def render(config: AppConfig) -> None:
+    """Render index inspection, creation, and removal workflows."""
+
+    st.title("Indexes")
+    _show_status_once()
+    table_uri = table_uri_control(key="index-table-open")
+    if not table_uri:
+        return
+
+    generation = generation_for(table_uri)
+    table_reference = selected_table_checkout_reference()
+    repository = LanceRepository(config.max_query_rows)
+    try:
+        snapshot = cached_snapshot(table_uri, table_reference, generation)
+        schema = repository.get_schema(table_uri, version=table_reference)
+    except Exception as exc:
+        st.error(str(exc))
+        return
+
+    indexes = snapshot.get("indexes", [])
+    existing_tab, create_tab, drop_tab = st.tabs(
+        ["Existing Indexes", "Create Index", "Drop Index"]
+    )
+    with existing_tab:
+        _render_existing_indexes_tab(indexes)
+    with create_tab:
+        _render_create_index_tab(config, repository, table_uri, schema, snapshot)
+    with drop_tab:
+        _render_drop_index_tab(config, repository, table_uri, indexes)

@@ -74,7 +74,7 @@ lance-explorer --create-demo-data ./demo/movie_stars.lance
 Defaults: 100 fictional movie-star rows, Faker locale `usa`, 3 table versions, a 64-float
 `embedding` column, bundled PNG headshots, `embedding_vector_idx` on `embedding`, and
 `bio_multilingual_fts_idx` on `bio`. Version 2 adds `publicity_risk` so schema diffing has
-something visible.
+something visible. Demo tags `initial_load` and `gala` mark the first load and a later demo state.
 
 Useful options:
 
@@ -114,11 +114,15 @@ difference between small row-local binary payloads and larger blob-backed payloa
 ## Using the App
 
 - Explorer selects `.lance` tables directly from clickable directory rows and keeps a deduped table history.
+- Open-table controls include a tag/version picker: latest first, tags next, then versions newest to oldest.
 - Table opens on the Sample tab; vector columns display as JSON arrays so embeddings can be copied.
+- Table shows LanceDB tags alongside versions, including tag manifest sizes.
 - Table includes read-only insert/update guidance with code exports for Arrow blobs, pandas, Pydantic, merge/upsert, and direct update workflows.
 - Query supports bounded filters, full-text search, hybrid search, and raw-vector search. FTS selectors show only indexed string columns.
 - Compare pre-fills from the selected table and table history. Bounded row comparison lists only columns common to both table URIs.
 - Code export expanders show copyable Python for the current operation.
+- Maintenance groups Optimize, Tags, Versions, and Table Management workflows into separate tabs.
+- Tagged versions are protected from regular version cleanup until the tag is manually deleted.
 
 ## Offline Docs
 
@@ -178,6 +182,7 @@ export LANCE_EXPLORER_TEMPLATE_DIR="/path/to/template/overrides"
 export LANCE_EXPLORER_MAX_QUERY_ROWS="10000"
 export LANCE_EXPLORER_DEFAULT_QUERY_ROWS="100"
 export LANCE_EXPLORER_DOCS_MIRROR_DIR="/path/to/docs_mirrors"
+export LANCE_EXPLORER_STATE_FILE="/path/to/lance-explorer-state.json"
 ```
 
 ## Validate

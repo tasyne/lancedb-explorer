@@ -178,3 +178,25 @@ def test_maintenance_restore_and_drop(tmp_path: Path) -> None:
 
     repository.drop_table(uri)
     assert "maintenance" not in repository.list_tables(str(tmp_path))
+
+
+def test_table_tag_lifecycle(tmp_path: Path) -> None:
+    db = lancedb.connect(str(tmp_path))
+    table = db.create_table("tagged", data=[{"id": 1}])
+    table.add([{"id": 2}])
+    uri = str(tmp_path / "tagged.lance")
+    repository = LanceRepository()
+
+    created = repository.set_tag(uri, "baseline", 1)
+    assert created == {"status": "created", "tag": "baseline", "version": 1}
+    tags = repository.list_tags(uri)
+    assert tags[0]["tag"] == "baseline"
+    assert tags[0]["version"] == 1
+
+    updated = repository.set_tag(uri, "baseline", 2)
+    assert updated == {"status": "updated", "tag": "baseline", "version": 2}
+    assert repository.list_tags(uri)[0]["version"] == 2
+
+    deleted = repository.delete_tag(uri, "baseline")
+    assert deleted == {"status": "deleted", "tag": "baseline"}
+    assert repository.list_tags(uri) == []

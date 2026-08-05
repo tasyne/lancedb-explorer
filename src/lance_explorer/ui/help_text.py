@@ -25,6 +25,10 @@ HELP: dict[str, str] = {
     "table_uri": (
         "A full .lance URI identifies one Lance table. Local paths and s3:// URIs are supported."
     ),
+    "table_reference": (
+        "Open the selected table at latest, a tag, or a historical version. Tags appear before "
+        "versions and protect their versions from regular cleanup until manually deleted."
+    ),
     "rows": "Current logical row count for the selected table version.",
     "version": (
         "Lance creates a new table version for each committed write. Versions share unchanged "
@@ -49,6 +53,18 @@ HELP: dict[str, str] = {
     "versions": (
         "Versions make reads reproducible and allow restoration. Retain versions while other "
         "processes may still need them."
+    ),
+    "tags": (
+        "Tags name specific versions. Tagged versions are protected from regular cleanup until "
+        "the tag is manually deleted."
+    ),
+    "set_tag": (
+        "Create a new tag or move an existing tag to the selected version. Use tags for "
+        "baselines, release snapshots, and reproducible experiments."
+    ),
+    "delete_tag": (
+        "Deletes only the tag label. The underlying version remains, but it may become eligible "
+        "for cleanup once no tag points to it."
     ),
     "schema_changes": (
         "Compare two historical versions to find added, removed, reordered, or type-changed fields."
@@ -132,9 +148,8 @@ HELP: dict[str, str] = {
         "writer or recovery process may still need them."
     ),
     "restore_version": (
-        "Creates a new latest version whose contents match the selected historical "
-        "version. It does "
-        "not erase the intervening version history."
+        "Commits a new latest version whose contents match the selected historical version. "
+        "Restoring version 18 from latest 19 creates version 20 matching 18."
     ),
     "drop_table": (
         "Permanently removes the table from its LanceDB database. This cannot be "

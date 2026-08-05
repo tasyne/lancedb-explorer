@@ -8,12 +8,12 @@ import streamlit as st
 from lance_explorer.config import AppConfig
 from lance_explorer.repository import LanceRepository
 from lance_explorer.schema_diff import diff_schemas
-from lance_explorer.ui.cache import cached_snapshot, cached_versions
+from lance_explorer.ui.cache import cached_snapshot, cached_tags, cached_versions
 from lance_explorer.ui.components.code_export import show_code_export
 from lance_explorer.ui.components.common import parse_version, table_uri_control, template_directory
 from lance_explorer.ui.components.dataframe import show_dataframe, vector_display_columns
 from lance_explorer.ui.help_text import help_text
-from lance_explorer.ui.state import generation_for
+from lance_explorer.ui.state import generation_for, selected_table_checkout_reference
 
 
 def _version_numbers(versions: list[dict[str, object]], current_version: object) -> list[int]:
@@ -36,6 +36,54 @@ def _sync_schema_diff_defaults(table_uri: str, version_numbers: list[int]) -> No
     st.session_state["schema_diff_defaults"] = defaults
     st.session_state["schema-left-version"] = str(version_numbers[0])
     st.session_state["schema-right-version"] = str(version_numbers[-1])
+
+
+def _versions_with_tags(
+    versions: list[dict[str, object]],
+    tags: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Join tag names and tag manifest sizes onto version rows."""
+
+    tags_by_version: dict[int, list[dict[str, object]]] = {}
+    for tag in tags:
+        version = tag.get("version")
+        if isinstance(version, int):
+            tags_by_version.setdefault(version, []).append(tag)
+    rows: list[dict[str, object]] = []
+    for version in versions:
+        row = dict(version)
+        version_number = row.get("version")
+        version_tags = (
+            tags_by_version.get(version_number, [])
+            if isinstance(version_number, int)
+            else []
+        )
+        row["tags"] = ", ".join(str(tag.get("tag", "")) for tag in version_tags if tag.get("tag"))
+        row["tag_manifest_sizes"] = ", ".join(
+            str(tag.get("manifest_size", ""))
+            for tag in version_tags
+            if tag.get("manifest_size") is not None
+        )
+        rows.append(row)
+    return rows
+
+
+def _open_code_reference_options(
+    tags: list[dict[str, object]],
+    version_numbers: list[int],
+) -> list[int | str | None]:
+    options: list[int | str | None] = [None]
+    options.extend(str(tag["tag"]) for tag in tags if tag.get("tag"))
+    options.extend(reversed(version_numbers))
+    return options
+
+
+def _open_code_reference_label(value: int | str | None) -> str:
+    if value is None:
+        return "Latest"
+    if isinstance(value, int):
+        return f"Version {value}"
+    return f"Tag {value}"
 
 
 def _render_insert_guidance(config: AppConfig, table_uri: str) -> None:
@@ -142,8 +190,9 @@ def render(config: AppConfig) -> None:
         return
 
     generation = generation_for(table_uri)
+    table_reference = selected_table_checkout_reference()
     try:
-        snapshot = cached_snapshot(table_uri, None, generation)
+        snapshot = cached_snapshot(table_uri, table_reference, generation)
     except Exception as exc:
         st.error(f"Unable to open table: {exc}")
         return
@@ -153,6 +202,11 @@ def render(config: AppConfig) -> None:
     except Exception as exc:
         versions = []
         st.warning(f"Unable to load table versions: {exc}")
+    try:
+        tags = cached_tags(table_uri, generation)
+    except Exception as exc:
+        tags = []
+        st.warning(f"Unable to load table tags: {exc}")
     version_numbers = _version_numbers(versions, snapshot["version"])
     _sync_schema_diff_defaults(table_uri, version_numbers)
     display_vector_columns = vector_display_columns(snapshot)
@@ -176,7 +230,15 @@ def render(config: AppConfig) -> None:
         indexes_tab,
         statistics_tab,
     ) = st.tabs(
-        ["Sample", "Insert data", "Schema", "Versions", "Schema changes", "Indexes", "Statistics"]
+        [
+            "Sample",
+            "Insert data",
+            "Schema",
+            "Versions",
+            "Schema changes",
+            "Indexes",
+            "Statistics",
+        ]
     )
     with sample_tab:
         st.caption("Bounded data preview", help=help_text("sample"))
@@ -190,7 +252,10 @@ def render(config: AppConfig) -> None:
         if load:
             try:
                 st.session_state["table_preview"] = LanceRepository(config.max_query_rows).preview(
-                    table_uri, columns=columns or None, limit=int(limit)
+                    table_uri,
+                    columns=columns or None,
+                    limit=int(limit),
+                    version=table_reference,
                 )
             except Exception as exc:
                 st.error(str(exc))
@@ -204,8 +269,12 @@ def render(config: AppConfig) -> None:
         st.dataframe(pd.DataFrame(snapshot["schema"]), width="stretch")
         st.code(snapshot["schema_string"], language="text")
     with versions_tab:
-        st.caption("Table history", help=help_text("versions"))
-        st.dataframe(pd.DataFrame(versions), width="stretch")
+        st.caption("Table history and tags", help=help_text("versions"))
+        st.info(
+            "Tags protect their target versions from regular cleanup. Delete a tag manually "
+            "before expecting version cleanup to remove that tagged version."
+        )
+        st.dataframe(pd.DataFrame(_versions_with_tags(versions, tags)), width="stretch")
     with schema_changes_tab:
         st.caption("Historical schema comparison", help=help_text("schema_changes"))
         with st.form("version-schema-diff"):
@@ -238,11 +307,11 @@ def render(config: AppConfig) -> None:
         st.caption("Physical layout", help=help_text("statistics"))
         st.json(statistics)
 
-    code_version_options: list[int | None] = [None, *reversed(version_numbers)]
+    code_version_options = _open_code_reference_options(tags, version_numbers)
     code_version = st.selectbox(
-        "Version for open-table code",
+        "Version or tag for open-table code",
         code_version_options,
-        format_func=lambda value: "Latest" if value is None else str(value),
+        format_func=_open_code_reference_label,
     )
     show_code_export(
         "open_table",

@@ -40,6 +40,8 @@ FAKER_LOCALE_ALIASES = {
 DEMO_EMBEDDING_DIM = 64
 DEMO_VECTOR_INDEX_NAME = "embedding_vector_idx"
 DEMO_FTS_INDEX_NAME = "bio_multilingual_fts_idx"
+DEMO_INITIAL_LOAD_TAG = "initial_load"
+DEMO_GALA_TAG = "gala"
 DEMO_HEADSHOT_MIME = "image/png"
 DEMO_HEADSHOT_ASSET_DIR = Path(__file__).with_name("demo_assets") / "headshots"
 DEMO_HEADSHOT_FILENAMES = (
@@ -153,6 +155,7 @@ class DemoTableResult:
     blob_v2_enabled: bool = False
     fts_preset: str = "MULTILINGUAL"
     fts_base_tokenizer: str = "icu"
+    tags: tuple[str, ...] = ()
 
 
 def resolve_faker_locale(value: str) -> str:
@@ -308,6 +311,29 @@ def _create_demo_fts_index(table: Any) -> tuple[str, dict[str, object]]:
     return fts_preset, fts_options
 
 
+def _create_demo_tags(table: Any, *, gala_version: int) -> tuple[str, ...]:
+    """Tag stable demo versions when LanceDB exposes the tags API."""
+
+    tags = getattr(table, "tags", None)
+    if tags is None:
+        return ()
+    created: list[str] = []
+    for tag_name, version in (
+        (DEMO_INITIAL_LOAD_TAG, 1),
+        (DEMO_GALA_TAG, gala_version),
+    ):
+        try:
+            existing = tags.list()
+            if tag_name in existing:
+                tags.update(tag_name, version)
+            else:
+                tags.create(tag_name, version)
+            created.append(tag_name)
+        except Exception:
+            continue
+    return tuple(created)
+
+
 def demo_fts_index_options() -> tuple[str, dict[str, object]]:
     """Return FTS options supported by the installed LanceDB version."""
 
@@ -381,6 +407,7 @@ def create_demo_table(
         )
         offset += chunk_size
 
+    demo_tags = _create_demo_tags(table, gala_version=int(table.version))
     _create_demo_vector_index(table, row_count)
     fts_preset, fts_options = _create_demo_fts_index(table)
 
@@ -394,4 +421,5 @@ def create_demo_table(
         blob_v2_enabled=use_blob_v2,
         fts_preset=fts_preset,
         fts_base_tokenizer=str(fts_options.get("base_tokenizer", "")),
+        tags=demo_tags,
     )

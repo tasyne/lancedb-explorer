@@ -147,7 +147,7 @@ class LanceRepository:
             storage_options=lancedb_storage_options_from_env() or None,
         )
 
-    def open_table(self, table_uri: str, version: int | None = None):
+    def open_table(self, table_uri: str, version: int | str | None = None):
         """Open a Lance table, optionally checked out at a specific version."""
 
         location = split_table_uri(table_uri)
@@ -179,7 +179,7 @@ class LanceRepository:
         location = split_table_uri(table_uri)
         return location.table_name in self.list_tables(location.database_uri)
 
-    def get_schema(self, table_uri: str, version: int | None = None) -> pa.Schema:
+    def get_schema(self, table_uri: str, version: int | str | None = None) -> pa.Schema:
         """Return the Arrow schema for a table or version."""
 
         return self.open_table(table_uri, version=version).schema
@@ -190,7 +190,23 @@ class LanceRepository:
         table = self.open_table(table_uri)
         return [_json_safe(item) for item in table.list_versions()]
 
-    def list_indexes(self, table_uri: str, version: int | None = None) -> list[dict[str, Any]]:
+    def list_tags(self, table_uri: str) -> list[dict[str, Any]]:
+        """Return table version tags as rows suitable for display."""
+
+        table = self.open_table(table_uri)
+        tags = getattr(table, "tags", None)
+        if tags is None:
+            return []
+        rows: list[dict[str, Any]] = []
+        for name, metadata in tags.list().items():
+            item = _public_object_dict(metadata)
+            item["tag"] = str(name)
+            rows.append(_json_safe(item))
+        return sorted(rows, key=lambda item: str(item.get("tag", "")))
+
+    def list_indexes(
+        self, table_uri: str, version: int | str | None = None
+    ) -> list[dict[str, Any]]:
         """Return index definitions and available statistics for a table."""
 
         table = self.open_table(table_uri, version=version)
@@ -207,7 +223,7 @@ class LanceRepository:
             output.append(_json_safe(item))
         return output
 
-    def snapshot(self, table_uri: str, version: int | None = None) -> dict[str, Any]:
+    def snapshot(self, table_uri: str, version: int | str | None = None) -> dict[str, Any]:
         """Collect bounded metadata used by the Table and Compare pages."""
 
         table = self.open_table(table_uri, version=version)
@@ -231,7 +247,7 @@ class LanceRepository:
         *,
         columns: list[str] | None = None,
         limit: int = 100,
-        version: int | None = None,
+        version: int | str | None = None,
     ) -> pd.DataFrame:
         """Return a bounded row preview through the same limit guard as queries."""
 
@@ -251,7 +267,7 @@ class LanceRepository:
         where: str | None,
         columns: list[str] | None,
         limit: int,
-        version: int | None = None,
+        version: int | str | None = None,
         include_plan: bool = False,
     ) -> QueryResult:
         """Run a bounded SQL-style filter/projection query."""
@@ -276,7 +292,7 @@ class LanceRepository:
         where: str | None,
         columns: list[str] | None,
         limit: int,
-        version: int | None = None,
+        version: int | str | None = None,
         include_plan: bool = False,
     ) -> QueryResult:
         """Run a bounded full-text search against a selected string column."""
@@ -302,7 +318,7 @@ class LanceRepository:
         where: str | None,
         columns: list[str] | None,
         limit: int,
-        version: int | None = None,
+        version: int | str | None = None,
         include_plan: bool = False,
     ) -> QueryResult:
         """Run a bounded raw-vector search without generating embeddings."""
@@ -335,7 +351,7 @@ class LanceRepository:
         columns: list[str] | None,
         limit: int,
         rerank: bool = True,
-        version: int | None = None,
+        version: int | str | None = None,
         include_plan: bool = False,
     ) -> QueryResult:
         """Run LanceDB hybrid search from separate text and raw-vector inputs."""
@@ -430,6 +446,37 @@ class LanceRepository:
         table = self.open_table(table_uri)
         result = table.restore(version)
         return {"status": "restored", "version": version, "result": _public_object_dict(result)}
+
+    def set_tag(self, table_uri: str, tag: str, version: int) -> dict[str, Any]:
+        """Create or move a table version tag."""
+
+        tag_name = tag.strip()
+        if not tag_name:
+            raise ValueError("Tag name cannot be empty")
+        table = self.open_table(table_uri)
+        tags = getattr(table, "tags", None)
+        if tags is None:
+            raise ValueError("This LanceDB version does not expose table tags.")
+        existing = tags.list()
+        action = "updated" if tag_name in existing else "created"
+        if action == "updated":
+            tags.update(tag_name, version)
+        else:
+            tags.create(tag_name, version)
+        return {"status": action, "tag": tag_name, "version": version}
+
+    def delete_tag(self, table_uri: str, tag: str) -> dict[str, Any]:
+        """Delete a table version tag without deleting the underlying version."""
+
+        tag_name = tag.strip()
+        if not tag_name:
+            raise ValueError("Tag name cannot be empty")
+        table = self.open_table(table_uri)
+        tags = getattr(table, "tags", None)
+        if tags is None:
+            raise ValueError("This LanceDB version does not expose table tags.")
+        tags.delete(tag_name)
+        return {"status": "deleted", "tag": tag_name}
 
     def drop_table(self, table_uri: str) -> dict[str, Any]:
         """Drop a Lance table from its parent database."""

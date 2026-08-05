@@ -6,7 +6,9 @@ import pyarrow as pa
 from lance_explorer.demo_data import (
     DEMO_EMBEDDING_DIM,
     DEMO_FTS_INDEX_NAME,
+    DEMO_GALA_TAG,
     DEMO_HEADSHOT_MIME,
+    DEMO_INITIAL_LOAD_TAG,
     DEMO_VECTOR_INDEX_NAME,
     create_demo_table,
     demo_fts_index_options,
@@ -48,6 +50,7 @@ def test_create_demo_table(tmp_path: Path) -> None:
     field_names = table.schema.names
     assert result.locale == resolve_faker_locale("spanish")
     assert result.version_count == 3
+    assert set(result.tags) == {DEMO_INITIAL_LOAD_TAG, DEMO_GALA_TAG}
     assert table.count_rows() == 7
     assert result.fts_preset in {"MULTILINGUAL", "ENGLISH"}
     assert "id" in field_names
@@ -82,6 +85,9 @@ def test_create_demo_table(tmp_path: Path) -> None:
     assert fts_indexes
     assert fts_indexes[0]["columns"] == ["bio"]
     assert fts_indexes[0]["index_details"]["base_tokenizer"] == result.fts_base_tokenizer
+    tags = {tag["tag"]: tag for tag in LanceRepository().list_tags(result.table_uri)}
+    assert tags[DEMO_INITIAL_LOAD_TAG]["version"] == 1
+    assert tags[DEMO_GALA_TAG]["version"] >= 2
 
 
 def test_demo_schema_can_fallback_to_arrow_binary_for_full_headshot() -> None:

@@ -131,6 +131,16 @@ def test_open_table_template_uses_checkout_for_versions() -> None:
     assert "table.checkout(open_version)" in code
 
 
+def test_open_table_template_can_checkout_tags() -> None:
+    code = TemplateRenderer().render(
+        "open_table",
+        {"table_uri": "/tmp/db/items.lance", "open_version": "baseline"},
+    )
+
+    assert "open_version = 'baseline'" in code
+    assert "table.checkout(open_version)" in code
+
+
 def test_insert_arrow_blob_template_renders_blob_v2_example() -> None:
     code = TemplateRenderer().render(
         "insert_arrow_blobs",

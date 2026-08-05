@@ -6,9 +6,15 @@ from lance_explorer.compat import lancedb_compatibility_warning
 from lance_explorer.config import AppConfig
 from lance_explorer.language_models import ensure_packaged_language_model_home
 from lance_explorer.paths import split_table_uri
+from lance_explorer.ui.cache import cached_tags
 from lance_explorer.ui.components.clipboard import browser_copy_button
 from lance_explorer.ui.help_text import LANCE_OVERVIEW, LANCE_STRENGTHS
-from lance_explorer.ui.state import initialize_state, select_table
+from lance_explorer.ui.state import (
+    generation_for,
+    initialize_state,
+    select_table,
+    selected_table_reference_label,
+)
 
 ensure_packaged_language_model_home()
 
@@ -150,6 +156,11 @@ def _render_table_selection_sidebar() -> None:
             icon=":material/database:",
             disabled=True,
         )
+        try:
+            tags = cached_tags(selected, generation_for(selected))
+        except Exception:
+            tags = []
+        st.sidebar.caption(f"Open at: {selected_table_reference_label(tags)}")
     else:
         st.sidebar.caption("No table selected")
 

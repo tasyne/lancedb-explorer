@@ -99,7 +99,8 @@ def run(argv: Sequence[str] | None = None) -> int:
             f"{binary_note} "
             f"Created indexes {DEMO_VECTOR_INDEX_NAME} on embedding and "
             f"{DEMO_FTS_INDEX_NAME} on bio using the {result.fts_preset} FTS preset "
-            f"({result.fts_base_tokenizer} tokenizer)."
+            f"({result.fts_base_tokenizer} tokenizer). "
+            f"Created demo tags: {', '.join(result.tags) if result.tags else 'none'}."
         )
         return 0
 
