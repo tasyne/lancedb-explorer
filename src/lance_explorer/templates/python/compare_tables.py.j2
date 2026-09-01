@@ -1,11 +1,28 @@
 {% include "_connection.py.j2" %}
 import pandas as pd
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 def open_table(table_uri: str, version: int | None = None):
-    path = UPath(table_uri)
-    db = lancedb.connect(str(path.parent), storage_options=storage_options or None)
-    table = db.open_table(path.name.removesuffix(".lance"))
+    if table_uri.startswith("lance-ns://"):
+        # Namespace references must be resolved through LanceDB's catalog API.
+        parsed = urlparse(table_uri)
+        namespace_impl = unquote(parsed.netloc)
+        root = parse_qs(parsed.query)["root"][0]
+        components = [unquote(part) for part in parsed.path.strip("/").split("/") if part]
+        namespace_path = components[:-1]
+        table_name = components[-1]
+        db = lancedb.connect_namespace(
+            namespace_impl,
+            {"root": root},
+            storage_options=storage_options or None,
+        )
+        table = db.open_table(table_name, namespace_path=namespace_path)
+    else:
+        # Direct table URIs open from local disk, S3, or another object-store path.
+        path = UPath(table_uri)
+        db = lancedb.connect(str(path.parent), storage_options=storage_options or None)
+        table = db.open_table(path.name.removesuffix(".lance"))
     if version is not None:
         table.checkout(version)
     return table

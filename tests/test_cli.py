@@ -5,7 +5,16 @@ from lance_explorer.demo_data import DemoTableResult
 def test_cli_create_demo_data_dispatches_to_generator(monkeypatch, capsys) -> None:
     calls = {}
 
-    def fake_create_demo_table(table_uri, *, row_count, locale, seed, version_count, overwrite):
+    def fake_create_demo_table(
+        table_uri,
+        *,
+        row_count,
+        locale,
+        seed,
+        version_count,
+        overwrite,
+        namespace_path,
+    ):
         calls["args"] = {
             "table_uri": table_uri,
             "row_count": row_count,
@@ -13,6 +22,7 @@ def test_cli_create_demo_data_dispatches_to_generator(monkeypatch, capsys) -> No
             "seed": seed,
             "version_count": version_count,
             "overwrite": overwrite,
+            "namespace_path": namespace_path,
         }
         return DemoTableResult(
             table_uri="/tmp/stars.lance",
@@ -21,6 +31,7 @@ def test_cli_create_demo_data_dispatches_to_generator(monkeypatch, capsys) -> No
             row_count=row_count,
             version_count=version_count,
             locale="en_US",
+            namespace_table_ref="lance-ns://dir/demo/movie_stars/stars?root=%2Ftmp",
         )
 
     monkeypatch.setattr(cli, "create_demo_table", fake_create_demo_table)
@@ -49,10 +60,12 @@ def test_cli_create_demo_data_dispatches_to_generator(monkeypatch, capsys) -> No
         "seed": 5,
         "version_count": 4,
         "overwrite": True,
+        "namespace_path": "demo/movie_stars",
     }
     output = capsys.readouterr().out
     assert "Created demo Lance table /tmp/stars.lance with 12 rows across 4 versions" in output
     assert "headshot_thumbnail_bytes, headshot_full_bytes" in output
+    assert "Namespace copy: lance-ns://dir/demo/movie_stars/stars?root=%2Ftmp" in output
 
 
 def test_cli_launches_streamlit_by_default(monkeypatch) -> None:

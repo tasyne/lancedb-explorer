@@ -1,8 +1,12 @@
+import shutil
 from pathlib import Path
 
 import lancedb
+import pytest
 
+from lance_explorer.demo_data import create_demo_table, supports_blob_v2
 from lance_explorer.repository import LanceRepository
+from lance_explorer.table_refs import format_namespace_table_ref
 
 
 def test_local_table_inspection_filter_and_versions(tmp_path: Path) -> None:
@@ -178,3 +182,206 @@ def test_maintenance_restore_and_drop(tmp_path: Path) -> None:
 
     repository.drop_table(uri)
     assert "maintenance" not in repository.list_tables(str(tmp_path))
+
+
+def test_table_tag_lifecycle(tmp_path: Path) -> None:
+    db = lancedb.connect(str(tmp_path))
+    table = db.create_table("tagged", data=[{"id": 1}])
+    table.add([{"id": 2}])
+    uri = str(tmp_path / "tagged.lance")
+    repository = LanceRepository()
+
+    created = repository.set_tag(uri, "baseline", 1)
+    assert created == {"status": "created", "tag": "baseline", "version": 1}
+    tags = repository.list_tags(uri)
+    assert tags[0]["tag"] == "baseline"
+    assert tags[0]["version"] == 1
+
+    updated = repository.set_tag(uri, "baseline", 2)
+    assert updated == {"status": "updated", "tag": "baseline", "version": 2}
+    assert repository.list_tags(uri)[0]["version"] == 2
+
+    deleted = repository.delete_tag(uri, "baseline")
+    assert deleted == {"status": "deleted", "tag": "baseline"}
+    assert repository.list_tags(uri) == []
+
+
+def test_namespace_table_lifecycle(tmp_path: Path) -> None:
+    if not hasattr(lancedb, "connect_namespace"):
+        pytest.skip("Installed LanceDB does not expose namespace APIs")
+
+    root = str(tmp_path / "catalog")
+    db = lancedb.connect_namespace("dir", {"root": root})
+    db.create_namespace(["prod"], mode="exist_ok")
+    db.create_namespace(["prod", "search"], mode="exist_ok", properties={"owner": "search"})
+    db.create_table(
+        "items",
+        data=[{"id": 1, "text": "red apple"}, {"id": 2, "text": "green pear"}],
+        namespace_path=["prod", "search"],
+    )
+
+    repository = LanceRepository()
+    table_ref = format_namespace_table_ref(root, ("prod", "search"), "items")
+
+    assert repository.list_namespaces(root, ()) == ["prod"]
+    assert repository.list_namespaces(root, ("prod",)) == ["search"]
+    assert repository.list_namespace_tables(root, ("prod", "search")) == ["items"]
+    tree = repository.namespace_tree(root)
+    assert tree["name"] == "(root)"
+    prod = tree["namespaces"][0]
+    assert prod["name"] == "prod"
+    search = prod["namespaces"][0]
+    assert search["path"] == ("prod", "search")
+    assert search["tables"] == ["items"]
+    assert repository.describe_namespace(root, ("prod", "search"))["properties"] == {
+        "owner": "search"
+    }
+    assert repository.table_exists(table_ref)
+    assert repository.snapshot(table_ref)["row_count"] == 2
+
+    repository.drop_table(table_ref)
+    assert repository.list_namespace_tables(root, ("prod", "search")) == []
+    repository.drop_namespace(root, ("prod", "search"))
+    assert repository.list_namespaces(root, ("prod",)) == []
+
+
+def test_import_table_to_namespace_registers_table_under_catalog_root(tmp_path: Path) -> None:
+    if not hasattr(lancedb, "connect_namespace"):
+        pytest.skip("Installed LanceDB does not expose namespace APIs")
+
+    root = str(tmp_path / "catalog")
+    db = lancedb.connect(root)
+    db.create_table("source", data=[{"id": 1}, {"id": 2}])
+    source_uri = str(Path(root) / "source.lance")
+    repository = LanceRepository()
+
+    result = repository.import_table_to_namespace(
+        source_uri,
+        root,
+        ("demo",),
+        "registered_source",
+    )
+
+    assert result["status"] == "registered"
+    assert result["method"] == "namespace metadata registration"
+    assert repository.snapshot(result["target"])["row_count"] == 2
+
+
+def test_import_table_to_existing_namespace_does_not_recreate_namespace(
+    tmp_path: Path,
+) -> None:
+    if not hasattr(lancedb, "connect_namespace"):
+        pytest.skip("Installed LanceDB does not expose namespace APIs")
+
+    root = str(tmp_path / "catalog")
+    db = lancedb.connect(root)
+    db.create_table("movie_stars", data=[{"id": 1}, {"id": 2}])
+    namespace_db = lancedb.connect_namespace("dir", {"root": root})
+    namespace_db.create_namespace(["prod"], mode="exist_ok")
+    source_uri = str(Path(root) / "movie_stars.lance")
+    repository = LanceRepository()
+
+    result = repository.import_table_to_namespace(
+        source_uri,
+        root,
+        ("prod",),
+        "movie_stars_newer",
+    )
+
+    assert result["status"] == "registered"
+    assert repository.list_namespace_tables(root, ("prod",)) == ["movie_stars_newer"]
+    assert repository.snapshot(result["target"])["row_count"] == 2
+
+
+def test_import_table_to_namespace_can_copy_external_table(tmp_path: Path) -> None:
+    if not hasattr(lancedb, "connect_namespace"):
+        pytest.skip("Installed LanceDB does not expose namespace APIs")
+
+    source_root = str(tmp_path / "source")
+    catalog_root = str(tmp_path / "catalog")
+    db = lancedb.connect(source_root)
+    db.create_table("source", data=[{"id": 1}, {"id": 2}, {"id": 3}])
+    source_uri = str(Path(source_root) / "source.lance")
+    repository = LanceRepository()
+
+    result = repository.import_table_to_namespace(
+        source_uri,
+        catalog_root,
+        ("demo",),
+        "copied_source",
+    )
+
+    assert result["status"] == "registered"
+    assert result["method"] == "physical table copy + namespace registration"
+    assert result["result"]["location"] == "__imports__demo__copied_source.lance"
+    assert repository.snapshot(result["target"])["row_count"] == 3
+    assert repository.drop_table(result["target"])["status"] == "dropped"
+    assert repository.list_namespace_tables(catalog_root, ("demo",)) == []
+
+
+def test_drop_namespace_table_repairs_slash_registered_import(tmp_path: Path) -> None:
+    if not hasattr(lancedb, "connect_namespace"):
+        pytest.skip("Installed LanceDB does not expose namespace APIs")
+
+    from lance_namespace_urllib3_client.models.register_table_request import (
+        RegisterTableRequest,
+    )
+
+    source_root = tmp_path / "source"
+    catalog_root = tmp_path / "catalog"
+    lancedb.connect(str(source_root)).create_table("source", data=[{"id": 1}, {"id": 2}])
+    source = source_root / "source.lance"
+    target = catalog_root / "__imports" / "dev" / "docs" / "movie_stars.lance"
+    target.parent.mkdir(parents=True)
+    shutil.copytree(source, target)
+
+    namespace_db = lancedb.connect_namespace("dir", {"root": str(catalog_root)})
+    namespace_db.create_namespace(["dev"], mode="exist_ok")
+    namespace_db.create_namespace(["dev", "docs"], mode="exist_ok")
+    namespace_db.namespace_client().register_table(
+        RegisterTableRequest(
+            id=["dev", "docs", "movie_stars"],
+            location="__imports/dev/docs/movie_stars.lance",
+            mode="Create",
+        )
+    )
+    table_ref = format_namespace_table_ref(
+        str(catalog_root),
+        ("dev", "docs"),
+        "movie_stars",
+    )
+    repository = LanceRepository()
+
+    assert repository.snapshot(table_ref)["row_count"] == 2
+    result = repository.drop_table(table_ref)
+
+    assert result["status"] == "dropped"
+    assert result["removed_storage"] is True
+    assert repository.list_namespace_tables(str(catalog_root), ("dev", "docs")) == []
+    assert not target.exists()
+
+
+def test_import_table_to_namespace_preserves_blob_storage_with_physical_copy(
+    tmp_path: Path,
+) -> None:
+    if not hasattr(lancedb, "connect_namespace") or not supports_blob_v2():
+        pytest.skip("Installed LanceDB does not expose Blob v2 namespace APIs")
+
+    source_uri = str(tmp_path / "source" / "movie_stars.lance")
+    create_demo_table(source_uri, row_count=3, namespace_path=None)
+    repository = LanceRepository()
+
+    result = repository.import_table_to_namespace(
+        source_uri,
+        str(tmp_path / "catalog"),
+        ("prod",),
+        "movie_stars",
+    )
+
+    assert result["method"] == "physical table copy + namespace registration"
+    snapshot = repository.snapshot(result["target"])
+    assert snapshot["row_count"] == 3
+    full_image_row = next(
+        row for row in snapshot["schema"] if row["path"] == "headshot_full_bytes"
+    )
+    assert full_image_row["type"].startswith("extension<lance.blob")

@@ -6,6 +6,7 @@ from lance_explorer.ui.pages.compare import (
     _common_columns_from_schemas,
     _comparison_default_uris,
     _sync_compare_uri_defaults,
+    _version_label,
 )
 
 
@@ -37,15 +38,11 @@ def test_sync_compare_uri_defaults_rehydrates_empty_uri_fields() -> None:
     )
     st.session_state["compare-left-uri"] = ""
     st.session_state["compare-right-uri"] = ""
-    st.session_state["row-left-uri"] = ""
-    st.session_state["row-right-uri"] = ""
 
     _sync_compare_uri_defaults()
 
     assert st.session_state["compare-left-uri"] == "/tmp/db/current.lance"
     assert st.session_state["compare-right-uri"] == "/tmp/db/previous.lance"
-    assert st.session_state["row-left-uri"] == "/tmp/db/current.lance"
-    assert st.session_state["row-right-uri"] == "/tmp/db/previous.lance"
 
 
 def test_common_columns_from_schemas_preserves_left_schema_order() -> None:
@@ -67,3 +64,8 @@ def test_common_columns_from_schemas_preserves_left_schema_order() -> None:
     )
 
     assert _common_columns_from_schemas(left, right) == ["id", "name", "score"]
+
+
+def test_version_label_formats_latest_and_versions() -> None:
+    assert _version_label(None) == "Latest"
+    assert _version_label(3) == "Version 3"

@@ -15,6 +15,7 @@ from lance_explorer.config import lancedb_storage_options_from_env
 from lance_explorer.index_compat import create_table_index
 from lance_explorer.index_registry import fts_options_for_preset
 from lance_explorer.paths import has_uri_scheme, split_table_uri
+from lance_explorer.table_refs import format_namespace_table_ref, namespace_path_from_text
 
 FAKER_LOCALE_ALIASES = {
     "usa": "en_US",
@@ -40,6 +41,9 @@ FAKER_LOCALE_ALIASES = {
 DEMO_EMBEDDING_DIM = 64
 DEMO_VECTOR_INDEX_NAME = "embedding_vector_idx"
 DEMO_FTS_INDEX_NAME = "bio_multilingual_fts_idx"
+DEMO_INITIAL_LOAD_TAG = "initial_load"
+DEMO_GALA_TAG = "gala"
+DEMO_NAMESPACE_PATH = ("demo", "movie_stars")
 DEMO_HEADSHOT_MIME = "image/png"
 DEMO_HEADSHOT_ASSET_DIR = Path(__file__).with_name("demo_assets") / "headshots"
 DEMO_HEADSHOT_FILENAMES = (
@@ -153,6 +157,9 @@ class DemoTableResult:
     blob_v2_enabled: bool = False
     fts_preset: str = "MULTILINGUAL"
     fts_base_tokenizer: str = "icu"
+    tags: tuple[str, ...] = ()
+    namespace_table_ref: str | None = None
+    namespace_path: tuple[str, ...] = ()
 
 
 def resolve_faker_locale(value: str) -> str:
@@ -308,6 +315,29 @@ def _create_demo_fts_index(table: Any) -> tuple[str, dict[str, object]]:
     return fts_preset, fts_options
 
 
+def _create_demo_tags(table: Any, *, gala_version: int) -> tuple[str, ...]:
+    """Tag stable demo versions when LanceDB exposes the tags API."""
+
+    tags = getattr(table, "tags", None)
+    if tags is None:
+        return ()
+    created: list[str] = []
+    for tag_name, version in (
+        (DEMO_INITIAL_LOAD_TAG, 1),
+        (DEMO_GALA_TAG, gala_version),
+    ):
+        try:
+            existing = tags.list()
+            if tag_name in existing:
+                tags.update(tag_name, version)
+            else:
+                tags.create(tag_name, version)
+            created.append(tag_name)
+        except Exception:
+            continue
+    return tuple(created)
+
+
 def demo_fts_index_options() -> tuple[str, dict[str, object]]:
     """Return FTS options supported by the installed LanceDB version."""
 
@@ -315,53 +345,58 @@ def demo_fts_index_options() -> tuple[str, dict[str, object]]:
     return preset, fts_options_for_preset(preset)
 
 
-def create_demo_table(
-    table_uri: str,
+def _resolved_namespace_path(value: str | tuple[str, ...] | None) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return namespace_path_from_text(value)
+    return tuple(part.strip() for part in value if part.strip())
+
+
+def _create_namespace_path(db: Any, namespace_path: tuple[str, ...]) -> None:
+    for index in range(1, len(namespace_path) + 1):
+        try:
+            existing = db.list_namespaces(list(namespace_path[: index - 1])).namespaces
+        except Exception:
+            existing = []
+        if namespace_path[index - 1] in existing:
+            continue
+        try:
+            db.create_namespace(list(namespace_path[:index]), mode="exist_ok")
+        except Exception as exc:
+            if "already exists" not in str(exc).lower():
+                raise
+
+
+def _write_demo_table(
+    db: Any,
+    table_name: str,
     *,
-    row_count: int = 100,
-    locale: str = "usa",
-    seed: int | None = None,
-    version_count: int = 3,
-    overwrite: bool = False,
-) -> DemoTableResult:
-    """Create a demo Lance table with multiple versions for diff workflows."""
+    rows: list[dict[str, Any]],
+    chunk_sizes: list[int],
+    base_schema: pa.Schema,
+    versioned_schema: pa.Schema,
+    use_blob_v2: bool,
+    row_count: int,
+    overwrite: bool,
+    namespace_path: tuple[str, ...] | None = None,
+) -> tuple[tuple[str, ...], str, dict[str, object], int]:
+    """Write the versioned demo table either directly or inside a namespace."""
 
-    if version_count < 2:
-        raise ValueError("Demo version count must be at least 2")
-    if version_count - 1 > row_count:
-        raise ValueError("Demo version count cannot exceed demo row count plus one")
+    create_options: dict[str, Any] = {}
+    if namespace_path is not None:
+        create_options["namespace_path"] = list(namespace_path)
+    if use_blob_v2:
+        create_options["data_storage_version"] = "2.2"
 
-    location = split_table_uri(table_uri)
-    if not has_uri_scheme(location.database_uri):
-        Path(location.database_uri).mkdir(parents=True, exist_ok=True)
-
-    resolved_locale = resolve_faker_locale(locale)
-    rows = demo_rows(
-        row_count=row_count,
-        locale=resolved_locale,
-        seed=seed,
-        include_publicity_risk=True,
-    )
-    row_chunk_count = max(1, version_count - 1)
-    chunk_sizes = _chunk_sizes(row_count, row_chunk_count)
     first_chunk_size = chunk_sizes[0]
-    use_blob_v2 = supports_blob_v2()
-    base_schema = demo_schema(use_blob_v2=use_blob_v2)
-    versioned_schema = base_schema.append(DEMO_VERSIONED_FIELD)
     data = _arrow_table_from_rows(
         [_base_schema_row(row, base_schema) for row in rows[:first_chunk_size]],
         base_schema,
         use_blob_v2=use_blob_v2,
     )
-    db = lancedb.connect(
-        location.database_uri,
-        storage_options=lancedb_storage_options_from_env() or None,
-    )
-    create_options: dict[str, Any] = {}
-    if use_blob_v2:
-        create_options["data_storage_version"] = "2.2"
     table = db.create_table(
-        location.table_name,
+        table_name,
         data=data,
         schema=base_schema,
         mode="overwrite" if overwrite else "create",
@@ -381,8 +416,87 @@ def create_demo_table(
         )
         offset += chunk_size
 
+    demo_tags = _create_demo_tags(table, gala_version=int(table.version))
     _create_demo_vector_index(table, row_count)
     fts_preset, fts_options = _create_demo_fts_index(table)
+    return demo_tags, fts_preset, fts_options, int(table.version)
+
+
+def create_demo_table(
+    table_uri: str,
+    *,
+    row_count: int = 100,
+    locale: str = "usa",
+    seed: int | None = None,
+    version_count: int = 3,
+    overwrite: bool = False,
+    namespace_path: str | tuple[str, ...] | None = DEMO_NAMESPACE_PATH,
+) -> DemoTableResult:
+    """Create direct and optional namespace demo Lance tables for diff workflows."""
+
+    if version_count < 2:
+        raise ValueError("Demo version count must be at least 2")
+    if version_count - 1 > row_count:
+        raise ValueError("Demo version count cannot exceed demo row count plus one")
+
+    location = split_table_uri(table_uri)
+    if not has_uri_scheme(location.database_uri):
+        Path(location.database_uri).mkdir(parents=True, exist_ok=True)
+
+    resolved_locale = resolve_faker_locale(locale)
+    rows = demo_rows(
+        row_count=row_count,
+        locale=resolved_locale,
+        seed=seed,
+        include_publicity_risk=True,
+    )
+    row_chunk_count = max(1, version_count - 1)
+    chunk_sizes = _chunk_sizes(row_count, row_chunk_count)
+    use_blob_v2 = supports_blob_v2()
+    base_schema = demo_schema(use_blob_v2=use_blob_v2)
+    versioned_schema = base_schema.append(DEMO_VERSIONED_FIELD)
+    db = lancedb.connect(
+        location.database_uri,
+        storage_options=lancedb_storage_options_from_env() or None,
+    )
+    demo_tags, fts_preset, fts_options, _direct_version = _write_demo_table(
+        db,
+        location.table_name,
+        rows=rows,
+        chunk_sizes=chunk_sizes,
+        base_schema=base_schema,
+        versioned_schema=versioned_schema,
+        use_blob_v2=use_blob_v2,
+        row_count=row_count,
+        overwrite=overwrite,
+    )
+
+    resolved_namespace_path = _resolved_namespace_path(namespace_path)
+    namespace_table_ref = None
+    if resolved_namespace_path and hasattr(lancedb, "connect_namespace"):
+        namespace_db = lancedb.connect_namespace(
+            "dir",
+            {"root": location.database_uri},
+            storage_options=lancedb_storage_options_from_env() or None,
+        )
+        _create_namespace_path(namespace_db, resolved_namespace_path)
+        _write_demo_table(
+            namespace_db,
+            location.table_name,
+            rows=rows,
+            chunk_sizes=chunk_sizes,
+            base_schema=base_schema,
+            versioned_schema=versioned_schema,
+            use_blob_v2=use_blob_v2,
+            row_count=row_count,
+            overwrite=overwrite,
+            namespace_path=resolved_namespace_path,
+        )
+        namespace_table_ref = format_namespace_table_ref(
+            location.database_uri,
+            resolved_namespace_path,
+            location.table_name,
+        )
 
     return DemoTableResult(
         table_uri=location.table_uri,
@@ -394,4 +508,7 @@ def create_demo_table(
         blob_v2_enabled=use_blob_v2,
         fts_preset=fts_preset,
         fts_base_tokenizer=str(fts_options.get("base_tokenizer", "")),
+        tags=demo_tags,
+        namespace_table_ref=namespace_table_ref,
+        namespace_path=resolved_namespace_path or (),
     )

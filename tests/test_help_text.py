@@ -17,6 +17,7 @@ def test_important_operations_have_succinct_help() -> None:
         "uri_bar",
         "database",
         "table_uri",
+        "table_reference",
         "version",
         "fragments",
         "indexes",
@@ -33,6 +34,9 @@ def test_important_operations_have_succinct_help() -> None:
         "optimize",
         "cleanup_versions",
         "restore_version",
+        "tags",
+        "set_tag",
+        "delete_tag",
         "drop_table",
         "code_export",
     }

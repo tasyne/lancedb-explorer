@@ -12,7 +12,7 @@ from lance_explorer.ui.components.common import table_uri_control, template_dire
 from lance_explorer.ui.components.dataframe import show_dataframe, vector_display_columns
 from lance_explorer.ui.components.language_models import show_language_model_downloads
 from lance_explorer.ui.help_text import help_text
-from lance_explorer.ui.state import generation_for
+from lance_explorer.ui.state import generation_for, selected_table_checkout_reference
 
 
 def _display_query_result(result: QueryResult | None, *, vector_columns: set[str]) -> None:
@@ -88,14 +88,18 @@ def render(config: AppConfig) -> None:
     if not table_uri:
         return
 
+    table_reference = selected_table_checkout_reference()
     try:
-        snapshot = cached_snapshot(table_uri, None, generation_for(table_uri))
+        snapshot = cached_snapshot(table_uri, table_reference, generation_for(table_uri))
     except Exception as exc:
         st.error(str(exc))
         return
 
     fields = [row["path"] for row in snapshot["schema"] if "." not in row["path"]]
-    type_by_field = {field.name: field.type for field in LanceRepository().get_schema(table_uri)}
+    type_by_field = {
+        field.name: field.type
+        for field in LanceRepository().get_schema(table_uri, version=table_reference)
+    }
     string_fields = [
         name
         for name, data_type in type_by_field.items()
@@ -143,6 +147,7 @@ def render(config: AppConfig) -> None:
                     where=where,
                     columns=filter_columns or None,
                     limit=int(limit),
+                    version=table_reference,
                     include_plan=plan,
                 )
             except Exception as exc:
@@ -203,6 +208,7 @@ def render(config: AppConfig) -> None:
                         where=fts_where,
                         columns=fts_columns or None,
                         limit=int(fts_limit),
+                        version=table_reference,
                         include_plan=fts_plan,
                     )
                 except Exception as exc:
@@ -295,6 +301,7 @@ def render(config: AppConfig) -> None:
                         columns=hybrid_columns or None,
                         limit=int(hybrid_limit),
                         rerank=hybrid_rerank,
+                        version=table_reference,
                         include_plan=hybrid_plan,
                     )
                 except Exception as exc:
@@ -360,6 +367,7 @@ def render(config: AppConfig) -> None:
                         where=vector_where,
                         columns=vector_columns or None,
                         limit=int(vector_limit),
+                        version=table_reference,
                         include_plan=vector_plan,
                     )
                 except Exception as exc:

@@ -33,6 +33,45 @@ def cached_table_names(database_uri: str, generation: int) -> list[str]:
     return LanceRepository().list_tables(database_uri)
 
 
+@st.cache_data(ttl=15, max_entries=256, show_spinner=False)
+def cached_namespace_listing(
+    root: str,
+    namespace_path: tuple[str, ...],
+    implementation: str,
+    generation: int,
+) -> dict[str, list[str]]:
+    """Cache namespace children and table names for a catalog location."""
+
+    del generation
+    repository = LanceRepository()
+    return {
+        "namespaces": repository.list_namespaces(
+            root, namespace_path, implementation=implementation
+        ),
+        "tables": repository.list_namespace_tables(
+            root, namespace_path, implementation=implementation
+        ),
+    }
+
+
+@st.cache_data(ttl=15, max_entries=128, show_spinner=False)
+def cached_namespace_tree(
+    root: str,
+    implementation: str,
+    max_depth: int,
+    generation: int,
+) -> dict[str, Any]:
+    """Cache a recursive namespace tree for the Namespace Explorer."""
+
+    del generation
+    return LanceRepository().namespace_tree(
+        root,
+        (),
+        implementation=implementation,
+        max_depth=max_depth,
+    )
+
+
 @st.cache_data(ttl=20, max_entries=512, show_spinner=False)
 def cached_snapshot(table_uri: str, version: int | None, generation: int) -> dict[str, Any]:
     """Cache a table metadata snapshot."""
@@ -47,6 +86,14 @@ def cached_versions(table_uri: str, generation: int) -> list[dict[str, Any]]:
 
     del generation
     return LanceRepository().list_versions(table_uri)
+
+
+@st.cache_data(ttl=20, max_entries=512, show_spinner=False)
+def cached_tags(table_uri: str, generation: int) -> list[dict[str, Any]]:
+    """Cache table version tags."""
+
+    del generation
+    return LanceRepository().list_tags(table_uri)
 
 
 @st.cache_data(ttl=20, max_entries=512, show_spinner=False)

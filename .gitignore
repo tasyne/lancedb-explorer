@@ -11,3 +11,6 @@ venv/
 .vscode/
 venv*
 .docs*
+*.txn
+*.manifest
+tmp_ns_probe*/
