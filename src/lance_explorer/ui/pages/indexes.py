@@ -15,8 +15,8 @@ from lance_explorer.index_registry import (
     fts_uses_packaged_model,
 )
 from lance_explorer.language_models import language_model_archive_bytes, language_model_archive_name
-from lance_explorer.paths import split_table_uri
 from lance_explorer.repository import LanceRepository
+from lance_explorer.table_refs import table_parent_resource
 from lance_explorer.ui.cache import cached_snapshot
 from lance_explorer.ui.components.code_export import show_code_export
 from lance_explorer.ui.components.common import table_uri_control, template_directory
@@ -161,7 +161,7 @@ def _language_option_applies(base_tokenizer: str) -> bool:
 
 def _refresh_after_mutation(table_uri: str) -> None:
     bump_generation(table_uri)
-    bump_generation(split_table_uri(table_uri).database_uri)
+    bump_generation(table_parent_resource(table_uri))
     st.session_state.query_results = {}
     st.session_state.comparison_results = {}
     st.session_state.pop("table_preview", None)

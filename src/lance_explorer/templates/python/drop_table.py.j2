@@ -1,5 +1,21 @@
 {% include "_connection.py.j2" %}
+from urllib.parse import parse_qs, unquote, urlparse
 
-table_path = UPath({{ table_uri | pyrepr }})
-db = lancedb.connect(str(table_path.parent), storage_options=storage_options or None)
-db.drop_table(table_path.name.removesuffix(".lance"))
+table_reference = {{ table_uri | pyrepr }}
+if table_reference.startswith("lance-ns://"):
+    parsed = urlparse(table_reference)
+    namespace_impl = unquote(parsed.netloc)
+    root = parse_qs(parsed.query)["root"][0]
+    components = [unquote(part) for part in parsed.path.strip("/").split("/") if part]
+    namespace_path = components[:-1]
+    table_name = components[-1]
+    db = lancedb.connect_namespace(
+        namespace_impl,
+        {"root": root},
+        storage_options=storage_options or None,
+    )
+    db.drop_table(table_name, namespace_path=namespace_path)
+else:
+    table_path = UPath(table_reference)
+    db = lancedb.connect(str(table_path.parent), storage_options=storage_options or None)
+    db.drop_table(table_path.name.removesuffix(".lance"))

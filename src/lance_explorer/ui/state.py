@@ -8,6 +8,7 @@ import streamlit as st
 
 from lance_explorer.config import AppConfig
 from lance_explorer.paths import normalize_uri, parent_uri
+from lance_explorer.table_refs import normalize_table_reference
 
 MAX_TABLE_HISTORY = 20
 LATEST_TABLE_REFERENCE = "latest"
@@ -24,6 +25,9 @@ def initialize_state(config: AppConfig) -> None:
         "selected_table_reference": persisted.get(
             "selected_table_reference", LATEST_TABLE_REFERENCE
         ),
+        "namespace_root": "",
+        "namespace_root_explicit": False,
+        "namespace_path": [],
         "navigation_history": [normalize_uri(config.home_uri)],
         "navigation_index": 0,
         "cache_generations": {},
@@ -142,7 +146,7 @@ def navigate_up() -> None:
 def select_table(uri: str) -> None:
     """Select a table, clear stale table outputs, and maintain deduped history."""
 
-    normalized = normalize_uri(uri)
+    normalized = normalize_table_reference(uri)
     if st.session_state.get("selected_table_uri") != normalized:
         st.session_state.query_results = {}
         st.session_state.pop("table_preview", None)
@@ -204,7 +208,7 @@ def _normalized_or_empty(value: str) -> str:
     if not value.strip():
         return ""
     try:
-        return normalize_uri(value)
+        return normalize_table_reference(value)
     except ValueError:
         return ""
 

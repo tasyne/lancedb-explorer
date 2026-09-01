@@ -6,9 +6,9 @@ import pandas as pd
 import streamlit as st
 
 from lance_explorer.config import AppConfig
-from lance_explorer.paths import split_table_uri
 from lance_explorer.repository import LanceRepository
 from lance_explorer.schema_diff import diff_schemas
+from lance_explorer.table_refs import resolve_table_location, table_parent_resource
 from lance_explorer.ui.cache import cached_tags, cached_versions
 from lance_explorer.ui.components.code_export import show_code_export
 from lance_explorer.ui.components.common import (
@@ -23,7 +23,7 @@ from lance_explorer.ui.state import bump_generation, generation_for
 
 def _refresh_after_mutation(table_uri: str) -> None:
     bump_generation(table_uri)
-    bump_generation(split_table_uri(table_uri).database_uri)
+    bump_generation(table_parent_resource(table_uri))
     st.session_state.query_results = {}
     st.session_state.comparison_results = {}
     st.session_state.pop("table_preview", None)
@@ -366,7 +366,12 @@ def render(config: AppConfig) -> None:
         return
 
     repository = LanceRepository(config.max_query_rows)
-    table_name = split_table_uri(table_uri).table_name
+    resolved_location = resolve_table_location(table_uri)
+    table_name = (
+        resolved_location.namespace.table_name
+        if resolved_location.namespace
+        else resolved_location.direct.table_name
+    )
     try:
         versions = cached_versions(table_uri, generation_for(table_uri))
     except Exception as exc:

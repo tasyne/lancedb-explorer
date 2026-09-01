@@ -1,0 +1,40 @@
+{% include "_connection.py.j2" %}
+import pyarrow as pa
+
+namespace_root = {{ namespace_root | pyrepr }}
+namespace_path = {{ namespace_path | pyrepr }}
+table_name = {{ table_name | pyrepr }}
+
+db = lancedb.connect_namespace(
+    "dir",
+    {"root": namespace_root},
+    storage_options=storage_options or None,
+)
+
+# Create missing namespace parents before creating the table.
+for index in range(1, len(namespace_path) + 1):
+    partial_path = namespace_path[:index]
+    try:
+        db.create_namespace(partial_path, mode="exist_ok")
+    except Exception as exc:
+        if "already exists" not in str(exc).lower():
+            raise
+
+schema = pa.schema(
+    [
+        pa.field("id", pa.int64()),
+        pa.field("text", pa.string()),
+        pa.field("embedding", pa.list_(pa.float32(), 64)),
+    ]
+)
+rows = [
+    {"id": 1, "text": "example row", "embedding": [0.0] * 64},
+]
+
+table = db.create_table(
+    table_name,
+    data=rows,
+    schema=schema,
+    namespace_path=namespace_path,
+    mode="create",
+)

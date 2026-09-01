@@ -23,7 +23,8 @@ HELP: dict[str, str] = {
         ".lance tables. Listing tables opens that location as a LanceDB catalog."
     ),
     "table_uri": (
-        "A full .lance URI identifies one Lance table. Local paths and s3:// URIs are supported."
+        "Open a full .lance URI or a namespace table reference selected from Explorer. "
+        "Local paths and s3:// roots are supported."
     ),
     "table_reference": (
         "Open the selected table at latest, a tag, or a historical version. Tags appear before "

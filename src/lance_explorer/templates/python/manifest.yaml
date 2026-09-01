@@ -9,6 +9,11 @@ templates:
     title: Open a Lance table
     language: python
     required_context: [table_uri, open_version]
+  create_namespace_table:
+    file: create_namespace_table.py.j2
+    title: Create a table in a namespace
+    language: python
+    required_context: [namespace_root, namespace_path, table_name]
   insert_arrow_blobs:
     file: insert_arrow_blobs.py.j2
     title: Append Arrow rows with image blobs

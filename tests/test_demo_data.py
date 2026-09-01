@@ -51,7 +51,10 @@ def test_create_demo_table(tmp_path: Path) -> None:
     assert result.locale == resolve_faker_locale("spanish")
     assert result.version_count == 3
     assert set(result.tags) == {DEMO_INITIAL_LOAD_TAG, DEMO_GALA_TAG}
+    assert result.namespace_table_ref is not None
+    assert result.namespace_path == ("demo", "movie_stars")
     assert table.count_rows() == 7
+    assert LanceRepository().snapshot(result.namespace_table_ref)["row_count"] == 7
     assert result.fts_preset in {"MULTILINGUAL", "ENGLISH"}
     assert "id" in field_names
     assert "bio" in field_names
@@ -88,6 +91,19 @@ def test_create_demo_table(tmp_path: Path) -> None:
     tags = {tag["tag"]: tag for tag in LanceRepository().list_tags(result.table_uri)}
     assert tags[DEMO_INITIAL_LOAD_TAG]["version"] == 1
     assert tags[DEMO_GALA_TAG]["version"] >= 2
+
+
+def test_create_demo_table_can_skip_namespace_copy(tmp_path: Path) -> None:
+    result = create_demo_table(
+        str(tmp_path / "stars.lance"),
+        row_count=3,
+        locale="usa",
+        seed=123,
+        namespace_path=None,
+    )
+
+    assert result.namespace_table_ref is None
+    assert result.namespace_path == ()
 
 
 def test_demo_schema_can_fallback_to_arrow_binary_for_full_headshot() -> None:

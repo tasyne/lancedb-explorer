@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from lance_explorer.codegen import TemplateRenderer
+from lance_explorer.table_refs import format_namespace_table_ref
 
 
 def test_connection_template_uses_runtime_storage_values_not_credentials(monkeypatch) -> None:
@@ -139,6 +140,40 @@ def test_open_table_template_can_checkout_tags() -> None:
 
     assert "open_version = 'baseline'" in code
     assert "table.checkout(open_version)" in code
+
+
+def test_open_table_template_supports_namespace_references() -> None:
+    table_ref = format_namespace_table_ref(
+        "s3://bucket/lance-root",
+        ("prod", "search"),
+        "items",
+    )
+
+    code = TemplateRenderer().render(
+        "open_table",
+        {"table_uri": table_ref, "open_version": None},
+    )
+
+    assert "lancedb.connect_namespace" in code
+    assert "namespace_path = components[:-1]" in code
+    assert "table = db.open_table(table_name, namespace_path=namespace_path)" in code
+
+
+def test_create_namespace_table_template_renders_namespace_path() -> None:
+    code = TemplateRenderer().render(
+        "create_namespace_table",
+        {
+            "namespace_root": "s3://bucket/lance-root",
+            "namespace_path": ["prod", "search"],
+            "table_name": "items",
+        },
+    )
+
+    assert "lancedb.connect_namespace" in code
+    assert "namespace_root = 's3://bucket/lance-root'" in code
+    assert "namespace_path = ['prod', 'search']" in code
+    assert "db.create_table(" in code
+    assert "namespace_path=namespace_path" in code
 
 
 def test_insert_arrow_blob_template_renders_blob_v2_example() -> None:

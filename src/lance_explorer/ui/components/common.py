@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from lance_explorer.config import AppConfig
-from lance_explorer.paths import normalize_uri, split_table_uri
+from lance_explorer.table_refs import normalize_table_reference, table_display_label
 from lance_explorer.ui.cache import cached_tags, cached_versions
 from lance_explorer.ui.components.dataframe import show_dataframe
 from lance_explorer.ui.help_text import help_text
@@ -45,7 +45,7 @@ def table_uri_control(*, key: str = "table_uri_control") -> str:
         )
         with uri_col:
             value = st.text_input(
-                "Full Lance table URI",
+                "Full Lance table URI or namespace table reference",
                 key=value_key,
                 placeholder="/data/db/table.lance",
                 help=help_text("table_uri"),
@@ -63,7 +63,7 @@ def table_uri_control(*, key: str = "table_uri_control") -> str:
             submitted = st.form_submit_button("Open table", width="stretch")
     if submitted:
         try:
-            normalized = normalize_uri(value)
+            normalized = normalize_table_reference(value)
             select_table(normalized)
             if normalized == current:
                 set_selected_table_reference(selected_reference)
@@ -75,13 +75,9 @@ def table_uri_control(*, key: str = "table_uri_control") -> str:
 
 def _short_table_label(table_uri: str) -> str:
     try:
-        location = split_table_uri(table_uri)
+        return table_display_label(table_uri)
     except Exception:
         return table_uri
-    parent = location.database_uri.rstrip("/\\").replace("\\", "/").split("/")[-1]
-    if parent:
-        return f"{parent}/{location.table_name}.lance"
-    return f"{location.table_name}.lance"
 
 
 def _table_tags_and_versions(

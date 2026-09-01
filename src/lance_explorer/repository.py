@@ -4,7 +4,9 @@ import json
 import math
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
+from urllib.parse import quote, unquote, urlparse
 
 import lancedb
 import pandas as pd
@@ -16,8 +18,13 @@ from lance_explorer.index_compat import create_table_index
 from lance_explorer.language_models import (
     ensure_packaged_language_model_home,
 )
-from lance_explorer.paths import TableLocation, split_table_uri
+from lance_explorer.paths import has_uri_scheme, make_upath
 from lance_explorer.schema_diff import schema_to_rows
+from lance_explorer.table_refs import (
+    NamespaceTableLocation,
+    format_namespace_table_ref,
+    resolve_table_location,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +134,63 @@ def _trim_query_result(
     return rows.loc[:, [column for column in output_columns if column in rows.columns]]
 
 
+def _relative_table_location(source_table_uri: str, namespace_root: str) -> str | None:
+    """Return source table location relative to a namespace root when possible."""
+
+    source = resolve_table_location(source_table_uri)
+    if source.namespace:
+        return None
+    assert source.direct is not None
+    source_uri = source.direct.table_uri
+    root = namespace_root.rstrip("/\\")
+    source_parsed = urlparse(source_uri)
+    root_parsed = urlparse(root)
+    if has_uri_scheme(source_uri) or has_uri_scheme(root):
+        if (source_parsed.scheme, source_parsed.netloc) != (
+            root_parsed.scheme,
+            root_parsed.netloc,
+        ):
+            return None
+        root_path = root_parsed.path.rstrip("/")
+        source_path = source_parsed.path
+        prefix = f"{root_path}/" if root_path else "/"
+        if not source_path.startswith(prefix):
+            return None
+        relative = source_path[len(prefix) :].strip("/")
+        return unquote(relative) or None
+
+    try:
+        relative_path = Path(source_uri).resolve().relative_to(Path(root).resolve())
+    except Exception:
+        return None
+    return relative_path.as_posix() or None
+
+
+def _import_relative_location(
+    namespace_path: tuple[str, ...],
+    table_name: str,
+) -> str:
+    """Return a catalog-relative physical copy location for imported tables."""
+
+    parts = ["__imports", *namespace_path, table_name]
+    encoded = "__".join(quote(part, safe="._-") for part in parts)
+    return f"{encoded}.lance"
+
+
+def _namespace_table_id(location: NamespaceTableLocation) -> list[str]:
+    """Return the namespace API identity for a namespace table reference."""
+
+    return [*location.namespace_path, location.table_name]
+
+
+def _registered_storage_path(root: str, location: str):
+    """Resolve a registered namespace location to the path Lance should delete."""
+
+    if has_uri_scheme(location):
+        return make_upath(location)
+    return make_upath(str(make_upath(root) / location))
+
+
 class LanceRepository:
     """Thin synchronous LanceDB adapter.
 
@@ -147,12 +211,41 @@ class LanceRepository:
             storage_options=lancedb_storage_options_from_env() or None,
         )
 
+    @staticmethod
+    def _connect_namespace(implementation: str, properties: dict[str, str]):
+        """Open a namespace-backed LanceDB connection when the SDK supports it."""
+
+        ensure_packaged_language_model_home()
+        if not hasattr(lancedb, "connect_namespace"):
+            raise RuntimeError(
+                "This LanceDB version does not expose namespace lifecycle APIs. "
+                "Install lancedb>=0.34.0 to browse and manage namespaces."
+            )
+        return lancedb.connect_namespace(
+            implementation,
+            properties,
+            storage_options=lancedb_storage_options_from_env() or None,
+        )
+
+    def _connect_namespace_location(self, location: NamespaceTableLocation):
+        return self._connect_namespace(location.implementation, {"root": location.root})
+
     def open_table(self, table_uri: str, version: int | str | None = None):
         """Open a Lance table, optionally checked out at a specific version."""
 
-        location = split_table_uri(table_uri)
-        db = self._connect(location.database_uri)
-        table = db.open_table(location.table_name)
+        resolved = resolve_table_location(table_uri)
+        if resolved.namespace:
+            # Namespace references must be resolved through LanceDB's catalog API.
+            db = self._connect_namespace_location(resolved.namespace)
+            table = db.open_table(
+                resolved.namespace.table_name,
+                namespace_path=list(resolved.namespace.namespace_path),
+            )
+        else:
+            # Direct table URIs open from local disk, S3, or another object-store path.
+            assert resolved.direct is not None
+            db = self._connect(resolved.direct.database_uri)
+            table = db.open_table(resolved.direct.table_name)
         if version is not None:
             # `open_table(version=...)` exists in newer LanceDB releases, but `checkout`
             # has been the stable time-travel path across more SDK versions.
@@ -176,8 +269,413 @@ class LanceRepository:
     def table_exists(self, table_uri: str) -> bool:
         """Return whether a full `.lance` URI is present in its parent database."""
 
-        location = split_table_uri(table_uri)
-        return location.table_name in self.list_tables(location.database_uri)
+        resolved = resolve_table_location(table_uri)
+        if resolved.namespace:
+            tables = self.list_namespace_tables(
+                resolved.namespace.root,
+                resolved.namespace.namespace_path,
+                implementation=resolved.namespace.implementation,
+            )
+            return resolved.namespace.table_name in tables
+        assert resolved.direct is not None
+        return resolved.direct.table_name in self.list_tables(resolved.direct.database_uri)
+
+    def list_namespaces(
+        self,
+        root: str,
+        namespace_path: list[str] | tuple[str, ...] | None = None,
+        *,
+        implementation: str = "dir",
+    ) -> list[str]:
+        """List immediate child namespaces for a namespace catalog root."""
+
+        db = self._connect_namespace(implementation, {"root": root})
+        names: list[str] = []
+        page_token: str | None = None
+        while len(names) < 10_000:
+            response = db.list_namespaces(
+                namespace_path=list(namespace_path or []),
+                page_token=page_token,
+                limit=min(1_000, 10_000 - len(names)),
+            )
+            names.extend(str(item) for item in getattr(response, "namespaces", []))
+            page_token = getattr(response, "page_token", None)
+            if not page_token:
+                break
+        return names
+
+    def list_namespace_tables(
+        self,
+        root: str,
+        namespace_path: list[str] | tuple[str, ...] | None = None,
+        *,
+        implementation: str = "dir",
+    ) -> list[str]:
+        """List tables inside a namespace path."""
+
+        db = self._connect_namespace(implementation, {"root": root})
+        names: list[str] = []
+        page_token: str | None = None
+        while len(names) < 10_000:
+            response = db.list_tables(
+                namespace_path=list(namespace_path or []),
+                page_token=page_token,
+                limit=min(1_000, 10_000 - len(names)),
+            )
+            names.extend(str(item) for item in getattr(response, "tables", []))
+            page_token = getattr(response, "page_token", None)
+            if not page_token:
+                break
+        return names
+
+    def namespace_tree(
+        self,
+        root: str,
+        namespace_path: list[str] | tuple[str, ...] | None = None,
+        *,
+        implementation: str = "dir",
+        max_depth: int = 8,
+    ) -> dict[str, Any]:
+        """Return a recursive namespace/table tree for compact UI browsing."""
+
+        path = tuple(namespace_path or ())
+        children = []
+        if max_depth > 0:
+            for name in sorted(
+                self.list_namespaces(root, path, implementation=implementation),
+                key=str.lower,
+            ):
+                children.append(
+                    self.namespace_tree(
+                        root,
+                        (*path, name),
+                        implementation=implementation,
+                        max_depth=max_depth - 1,
+                    )
+                )
+        return {
+            "name": path[-1] if path else "(root)",
+            "path": path,
+            "namespaces": children,
+            "tables": sorted(
+                self.list_namespace_tables(root, path, implementation=implementation),
+                key=str.lower,
+            ),
+        }
+
+    def describe_namespace(
+        self,
+        root: str,
+        namespace_path: list[str] | tuple[str, ...],
+        *,
+        implementation: str = "dir",
+    ) -> dict[str, Any]:
+        """Return namespace metadata/properties from the catalog."""
+
+        db = self._connect_namespace(implementation, {"root": root})
+        response = db.describe_namespace(list(namespace_path))
+        return _public_object_dict(response)
+
+    def create_namespace(
+        self,
+        root: str,
+        namespace_path: list[str] | tuple[str, ...],
+        *,
+        implementation: str = "dir",
+        mode: str = "exist_ok",
+        properties: dict[str, str] | None = None,
+        create_parents: bool = True,
+    ) -> dict[str, Any]:
+        """Create a namespace and optionally ensure parent namespaces first."""
+
+        path = list(namespace_path)
+        if not path:
+            raise ValueError("Cannot create the root namespace")
+        if mode == "exist_ok" and self.namespace_exists(
+            root, path, implementation=implementation
+        ):
+            return {"status": "exists", "namespace": "/".join(path), "responses": []}
+        db = self._connect_namespace(implementation, {"root": root})
+        responses: list[dict[str, Any]] = []
+        if create_parents and len(path) > 1:
+            responses.extend(
+                self.ensure_namespace_path(root, path[:-1], implementation=implementation)
+            )
+        response = db.create_namespace(path, mode=mode, properties=properties or None)
+        responses.append(_public_object_dict(response))
+        return {"status": "created", "namespace": "/".join(path), "responses": responses}
+
+    def namespace_exists(
+        self,
+        root: str,
+        namespace_path: list[str] | tuple[str, ...],
+        *,
+        implementation: str = "dir",
+    ) -> bool:
+        """Return whether a namespace path exists without creating it."""
+
+        path = tuple(namespace_path)
+        if not path:
+            return True
+        parent = path[:-1]
+        try:
+            return path[-1] in self.list_namespaces(
+                root, parent, implementation=implementation
+            )
+        except Exception:
+            try:
+                self.describe_namespace(root, path, implementation=implementation)
+                return True
+            except Exception:
+                return False
+
+    def ensure_namespace_path(
+        self,
+        root: str,
+        namespace_path: list[str] | tuple[str, ...],
+        *,
+        implementation: str = "dir",
+    ) -> list[dict[str, Any]]:
+        """Create missing namespace components while leaving existing nodes intact."""
+
+        path = tuple(namespace_path)
+        responses: list[dict[str, Any]] = []
+        for index in range(1, len(path) + 1):
+            partial = path[:index]
+            if self.namespace_exists(root, partial, implementation=implementation):
+                continue
+            response = self.create_namespace(
+                root,
+                partial,
+                implementation=implementation,
+                mode="create",
+                create_parents=False,
+            )
+            responses.append(response)
+        return responses
+
+    def drop_namespace(
+        self,
+        root: str,
+        namespace_path: list[str] | tuple[str, ...],
+        *,
+        implementation: str = "dir",
+        mode: str = "FAIL",
+        behavior: str = "RESTRICT",
+    ) -> dict[str, Any]:
+        """Drop a namespace using LanceDB's restrict/cascade behavior."""
+
+        path = list(namespace_path)
+        if not path:
+            raise ValueError("Cannot drop the root namespace")
+        db = self._connect_namespace(implementation, {"root": root})
+        response = db.drop_namespace(path, mode=mode, behavior=behavior)
+        return {
+            "status": "dropped",
+            "namespace": "/".join(path),
+            "result": _public_object_dict(response),
+        }
+
+    def namespace_table_reference(
+        self,
+        root: str,
+        namespace_path: list[str] | tuple[str, ...],
+        table_name: str,
+        *,
+        implementation: str = "dir",
+    ) -> str:
+        """Return the app's canonical reference for a namespace table."""
+
+        return format_namespace_table_ref(
+            root,
+            tuple(namespace_path),
+            table_name,
+            implementation=implementation,
+        )
+
+    def import_table_to_namespace(
+        self,
+        source_table_uri: str,
+        root: str,
+        namespace_path: list[str] | tuple[str, ...],
+        table_name: str,
+        *,
+        implementation: str = "dir",
+        mode: str = "create",
+        prefer_registration: bool = True,
+        batch_size: int = 8192,
+    ) -> dict[str, Any]:
+        """Import a selected table into a namespace, preferring metadata registration."""
+
+        target_name = table_name.strip()
+        if not target_name:
+            raise ValueError("Target table name cannot be empty")
+        path = tuple(namespace_path)
+        if path:
+            self.ensure_namespace_path(root, path, implementation=implementation)
+        db = self._connect_namespace(implementation, {"root": root})
+        target_ref = format_namespace_table_ref(
+            root, path, target_name, implementation=implementation
+        )
+
+        if prefer_registration:
+            registered = self._try_register_table_location(
+                db,
+                source_table_uri,
+                root,
+                path,
+                target_name,
+                mode=mode,
+            )
+            if registered is not None:
+                return {
+                    "status": "registered",
+                    "target": target_ref,
+                    "method": "namespace metadata registration",
+                    "result": registered,
+                }
+
+        copied = self._try_copy_table_location_into_catalog(
+            db,
+            source_table_uri,
+            root,
+            path,
+            target_name,
+            mode=mode,
+        )
+        if copied is not None:
+            return {
+                "status": "registered",
+                "target": target_ref,
+                "method": "physical table copy + namespace registration",
+                "result": copied,
+                "note": (
+                    "Copied the Lance table directory before registering it. Versions, indexes, "
+                    "and blob files are preserved by copying the physical table storage."
+                ),
+            }
+
+        source_table = self.open_table(source_table_uri)
+        row_count = int(source_table.count_rows())
+        reader = (
+            None
+            if row_count == 0
+            else source_table.search().limit(row_count).to_batches(batch_size=batch_size)
+        )
+        db.create_table(
+            target_name,
+            data=reader,
+            schema=source_table.schema,
+            mode=mode,
+            namespace_path=list(path),
+        )
+        return {
+            "status": "copied",
+            "target": target_ref,
+            "method": "Arrow batch copy",
+            "row_count": row_count,
+            "note": (
+                "Copied the current logical rows only; source history, tags, indexes, "
+                "and physical blob layout are not preserved."
+            ),
+        }
+
+    def _try_register_table_location(
+        self,
+        namespace_db: Any,
+        source_table_uri: str,
+        root: str,
+        namespace_path: tuple[str, ...],
+        table_name: str,
+        *,
+        mode: str,
+    ) -> dict[str, Any] | None:
+        """Register an existing table location when it is already under the catalog root."""
+
+        location = _relative_table_location(source_table_uri, root)
+        if location is None:
+            return None
+        return self._register_table_location(
+            namespace_db,
+            location,
+            namespace_path,
+            table_name,
+            mode=mode,
+        )
+
+    def _try_copy_table_location_into_catalog(
+        self,
+        namespace_db: Any,
+        source_table_uri: str,
+        root: str,
+        namespace_path: tuple[str, ...],
+        table_name: str,
+        *,
+        mode: str,
+    ) -> dict[str, Any] | None:
+        """Copy a direct `.lance` table directory into the catalog and register it."""
+
+        resolved = resolve_table_location(source_table_uri)
+        if resolved.namespace:
+            return None
+        assert resolved.direct is not None
+
+        relative_location = _import_relative_location(namespace_path, table_name)
+        source = make_upath(resolved.direct.table_uri)
+        target = make_upath(str(make_upath(root) / relative_location))
+        if target.exists():
+            if mode != "overwrite":
+                raise ValueError(
+                    f"Import target storage already exists: {target}. "
+                    "Use overwrite only if replacing it is intended."
+                )
+            target.fs.rm(str(target), recursive=True)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            source.copy(str(target), recursive=True)
+        except Exception:
+            return None
+        registered = self._register_table_location(
+            namespace_db,
+            relative_location,
+            namespace_path,
+            table_name,
+            mode=mode,
+        )
+        return {
+            "location": relative_location,
+            "copied_from": resolved.direct.table_uri,
+            "registration": registered,
+        }
+
+    def _register_table_location(
+        self,
+        namespace_db: Any,
+        location: str,
+        namespace_path: tuple[str, ...],
+        table_name: str,
+        *,
+        mode: str,
+    ) -> dict[str, Any] | None:
+        """Register a catalog-relative physical table location."""
+
+        try:
+            from lance_namespace_urllib3_client.models.register_table_request import (
+                RegisterTableRequest,
+            )
+        except Exception:
+            return None
+        try:
+            response = namespace_db.namespace_client().register_table(
+                RegisterTableRequest(
+                    id=[*namespace_path, table_name],
+                    location=location,
+                    mode="Overwrite" if mode == "overwrite" else "Create",
+                )
+            )
+        except Exception:
+            return None
+        return {"location": location, "response": _public_object_dict(response)}
 
     def get_schema(self, table_uri: str, version: int | str | None = None) -> pa.Schema:
         """Return the Arrow schema for a table or version."""
@@ -478,13 +976,116 @@ class LanceRepository:
         tags.delete(tag_name)
         return {"status": "deleted", "tag": tag_name}
 
+    def _describe_namespace_table_location(
+        self,
+        namespace_db: Any,
+        location: NamespaceTableLocation,
+    ) -> str | None:
+        """Return the storage location registered for a namespace table."""
+
+        try:
+            from lance_namespace_urllib3_client.models.describe_table_request import (
+                DescribeTableRequest,
+            )
+        except Exception:
+            return None
+        try:
+            response = namespace_db.namespace_client().describe_table(
+                DescribeTableRequest(
+                    id=_namespace_table_id(location),
+                    with_table_uri=True,
+                )
+            )
+        except Exception:
+            return None
+        return str(getattr(response, "location", "") or getattr(response, "table_uri", "") or "")
+
+    def _deregister_namespace_table(
+        self,
+        namespace_db: Any,
+        location: NamespaceTableLocation,
+    ) -> dict[str, Any] | None:
+        """Remove a namespace catalog entry without touching table storage."""
+
+        try:
+            from lance_namespace_urllib3_client.models.deregister_table_request import (
+                DeregisterTableRequest,
+            )
+        except Exception:
+            return None
+        try:
+            response = namespace_db.namespace_client().deregister_table(
+                DeregisterTableRequest(id=_namespace_table_id(location))
+            )
+        except Exception as exc:
+            if "Table not found" in str(exc):
+                return {"status": "already_absent"}
+            raise
+        return _public_object_dict(response)
+
+    def _repair_namespace_drop_after_location_error(
+        self,
+        namespace_db: Any,
+        location: NamespaceTableLocation,
+        registered_location: str | None,
+        original_error: Exception,
+    ) -> dict[str, Any] | None:
+        """Work around LanceDB 0.34 slash-encoding failures during namespace drops."""
+
+        error_text = str(original_error)
+        if (
+            not registered_location
+            or "Failed to delete table directory" not in error_text
+            or "%2F" not in error_text
+        ):
+            return None
+
+        storage_path = _registered_storage_path(location.root, registered_location)
+        removed_storage = False
+        if storage_path.exists():
+            storage_path.fs.rm(str(storage_path), recursive=True)
+            removed_storage = True
+        deregistered = self._deregister_namespace_table(namespace_db, location)
+        return {
+            "status": "dropped",
+            "table": location.table_name,
+            "method": "manual namespace deregistration after SDK drop fallback",
+            "removed_storage": removed_storage,
+            "registered_location": registered_location,
+            "deregistered": deregistered,
+            "sdk_error": error_text,
+        }
+
     def drop_table(self, table_uri: str) -> dict[str, Any]:
         """Drop a Lance table from its parent database."""
 
-        location: TableLocation = split_table_uri(table_uri)
-        db = self._connect(location.database_uri)
-        db.drop_table(location.table_name)
-        return {"status": "dropped", "table": location.table_name}
+        resolved = resolve_table_location(table_uri)
+        if resolved.namespace:
+            db = self._connect_namespace_location(resolved.namespace)
+            registered_location = self._describe_namespace_table_location(
+                db,
+                resolved.namespace,
+            )
+            try:
+                db.drop_table(
+                    resolved.namespace.table_name,
+                    namespace_path=list(resolved.namespace.namespace_path),
+                )
+            except Exception as exc:
+                repaired = self._repair_namespace_drop_after_location_error(
+                    db,
+                    resolved.namespace,
+                    registered_location,
+                    exc,
+                )
+                if repaired is not None:
+                    return repaired
+                raise
+            return {"status": "dropped", "table": resolved.namespace.table_name}
+        assert resolved.direct is not None
+        db = self._connect(resolved.direct.database_uri)
+        db.drop_table(resolved.direct.table_name)
+        return {"status": "dropped", "table": resolved.direct.table_name}
 
     def _validated_limit(self, limit: int) -> int:
         if limit < 1:

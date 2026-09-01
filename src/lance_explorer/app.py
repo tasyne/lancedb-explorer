@@ -5,7 +5,7 @@ import streamlit as st
 from lance_explorer.compat import lancedb_compatibility_warning
 from lance_explorer.config import AppConfig
 from lance_explorer.language_models import ensure_packaged_language_model_home
-from lance_explorer.paths import split_table_uri
+from lance_explorer.table_refs import is_namespace_table_ref, table_display_label
 from lance_explorer.ui.cache import cached_tags
 from lance_explorer.ui.components.clipboard import browser_copy_button
 from lance_explorer.ui.help_text import LANCE_OVERVIEW, LANCE_STRENGTHS
@@ -99,11 +99,7 @@ def _install_global_css() -> None:
 
 def _short_table_label(table_uri: str) -> str:
     try:
-        location = split_table_uri(table_uri)
-        parent_name = location.database_uri.rstrip("/\\").replace("\\", "/").split("/")[-1]
-        if parent_name:
-            return f"{parent_name}/{location.table_name}.lance"
-        return f"{location.table_name}.lance"
+        return table_display_label(table_uri)
     except Exception:
         return table_uri
 
@@ -150,10 +146,13 @@ def _render_table_selection_sidebar() -> None:
     st.sidebar.divider()
     st.sidebar.caption("Selected table")
     if selected:
+        selected_icon = (
+            ":material/account_tree:" if is_namespace_table_ref(selected) else ":material/database:"
+        )
         _table_uri_row(
             selected,
             key="selected-table-current",
-            icon=":material/database:",
+            icon=selected_icon,
             disabled=True,
         )
         try:
@@ -169,10 +168,15 @@ def _render_table_selection_sidebar() -> None:
         st.sidebar.caption("No prior table selections")
         return
     for index, table_uri in enumerate(history[:10]):
+        history_icon = (
+            ":material/account_tree:"
+            if is_namespace_table_ref(table_uri)
+            else ":material/history:"
+        )
         if _table_uri_row(
             table_uri,
             key=f"selected-table-history-{index}-{table_uri}",
-            icon=":material/history:",
+            icon=history_icon,
         ):
             select_table(table_uri)
             st.rerun()

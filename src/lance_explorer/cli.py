@@ -9,6 +9,7 @@ from pathlib import Path
 from lance_explorer.demo_data import (
     DEMO_BINARY_COLUMNS,
     DEMO_FTS_INDEX_NAME,
+    DEMO_NAMESPACE_PATH,
     DEMO_VECTOR_INDEX_NAME,
     FAKER_LOCALE_ALIASES,
     create_demo_table,
@@ -59,6 +60,21 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Overwrite an existing demo table at the target URI.",
     )
+    parser.add_argument(
+        "--demo-namespace",
+        default="/".join(DEMO_NAMESPACE_PATH),
+        help=(
+            "Also create a namespace-backed copy under this slash-delimited namespace path. "
+            "Defaults to demo/movie_stars."
+        ),
+    )
+    parser.add_argument(
+        "--no-demo-namespace",
+        action="store_const",
+        const=None,
+        dest="demo_namespace",
+        help="Skip creating the namespace-backed demo table copy.",
+    )
     return parser
 
 
@@ -79,6 +95,7 @@ def run(argv: Sequence[str] | None = None) -> int:
                 seed=args.demo_seed,
                 version_count=args.demo_versions,
                 overwrite=args.overwrite_demo_data,
+                namespace_path=args.demo_namespace,
             )
         except Exception as exc:
             print(f"Unable to create demo data: {exc}", file=sys.stderr)
@@ -100,7 +117,8 @@ def run(argv: Sequence[str] | None = None) -> int:
             f"Created indexes {DEMO_VECTOR_INDEX_NAME} on embedding and "
             f"{DEMO_FTS_INDEX_NAME} on bio using the {result.fts_preset} FTS preset "
             f"({result.fts_base_tokenizer} tokenizer). "
-            f"Created demo tags: {', '.join(result.tags) if result.tags else 'none'}."
+            f"Created demo tags: {', '.join(result.tags) if result.tags else 'none'}. "
+            f"Namespace copy: {result.namespace_table_ref or 'not created'}."
         )
         return 0
 

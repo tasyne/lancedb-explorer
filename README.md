@@ -75,6 +75,9 @@ Defaults: 100 fictional movie-star rows, Faker locale `usa`, 3 table versions, a
 `embedding` column, bundled PNG headshots, `embedding_vector_idx` on `embedding`, and
 `bio_multilingual_fts_idx` on `bio`. Version 2 adds `publicity_risk` so schema diffing has
 something visible. Demo tags `initial_load` and `gala` mark the first load and a later demo state.
+When LanceDB namespace APIs are available, the CLI also creates a namespace-backed copy at
+`demo/movie_stars/<table_name>` under the same catalog root so the Namespace Explorer has data to
+browse.
 
 Useful options:
 
@@ -82,6 +85,8 @@ Useful options:
 lance-explorer --create-demo-data ./demo/movie_stars.lance --faker-locale spanish
 lance-explorer --create-demo-data ./demo/movie_stars.lance --demo-rows 250 --demo-versions 4
 lance-explorer --create-demo-data ./demo/movie_stars.lance --demo-seed 42
+lance-explorer --create-demo-data ./demo/movie_stars.lance --demo-namespace prod/search
+lance-explorer --create-demo-data ./demo/movie_stars.lance --no-demo-namespace
 lance-explorer --create-demo-data ./demo/movie_stars.lance --overwrite-demo-data
 ```
 
@@ -114,6 +119,7 @@ difference between small row-local binary payloads and larger blob-backed payloa
 ## Using the App
 
 - Explorer selects `.lance` tables directly from clickable directory rows and keeps a deduped table history.
+- Explorer also has a Namespace Explorer for directory-backed namespace catalogs on local paths or S3 roots.
 - Open-table controls include a tag/version picker: latest first, tags next, then versions newest to oldest.
 - Table opens on the Sample tab; vector columns display as JSON arrays so embeddings can be copied.
 - Table shows LanceDB tags alongside versions, including tag manifest sizes.
@@ -123,6 +129,19 @@ difference between small row-local binary payloads and larger blob-backed payloa
 - Code export expanders show copyable Python for the current operation.
 - Maintenance groups Optimize, Tags, Versions, and Table Management workflows into separate tabs.
 - Tagged versions are protected from regular version cleanup until the tag is manually deleted.
+
+## Namespaces
+
+Namespaces require LanceDB `0.34.0+`. Use Explorer > Namespace Explorer to open a catalog root
+such as `./local_lancedb` or `s3://bucket/lance-root`, browse the namespace tree, add child
+namespaces beside any node, drop namespaces with confirmation, and select tables inside them.
+Namespace-selected tables appear in table history with an `ns:` label and use an internal
+`lance-ns://...` reference so other pages can open, query, compare, index, and maintain them.
+The tree can also import the currently selected table into any namespace. If a direct table already
+lives under the catalog root, the app first tries metadata registration to avoid copying data;
+otherwise it copies the physical Lance table directory into the catalog and registers that copy.
+This preserves versions, indexes, and blob files better than row-level copy. The Namespace Explorer
+also includes a code export showing how to create a new table directly in the focused namespace.
 
 ## Offline Docs
 
