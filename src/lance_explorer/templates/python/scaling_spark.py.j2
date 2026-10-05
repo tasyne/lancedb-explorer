@@ -1,0 +1,84 @@
+# Requires the matching Lance Spark connector >= 0.4.0.
+{% if has_vector_index %}# Install pylance >= 9.0 on the Spark driver and executors for vector indexing.
+{% endif %}from pyspark.sql import SparkSession
+{% if has_vector_index %}import lance
+{% endif %}
+SOURCE_URI = "s3://bucket/source"
+TABLE_URI = "s3://bucket/dataset.lance"
+{% if has_fts %}LANCE_TABLE = "lance.default.target_table"  # Catalog name for Spark SQL indexing.
+{% endif %}
+spark = SparkSession.builder.appName("lance-ingestion").getOrCreate()
+{% if load_pattern == "one-time bulk load" %}# One-time bulk load: write once, verify fragments, then build indexes.
+{% elif load_pattern == "occasional large batch" %}# Occasional large batch: append complete deliveries and coalesce small tail partitions.
+{% elif load_pattern == "regular batch" %}# Regular batch: buffer roughly {{ buffered_append_low }}-{{ buffered_append_high }} rows or more per append.
+# Compact by threshold, not after every batch.
+{% else %}# Frequent arrivals: stage and flush roughly {{ buffered_append_low }}-{{ buffered_append_high }} rows at a time.
+# Do not create one Lance commit per event.
+{% endif %}
+{% if source_type == "S3 / Parquet / files" %}source_df = spark.read.parquet(SOURCE_URI)
+{% elif source_type == "existing Lance table" %}source_df = spark.read.format("lance").load(SOURCE_URI)
+{% elif source_type == "Trino-accessible SQL/table source" %}# Replace this with the table exposed by your existing Spark catalog or JDBC reader.
+source_df = spark.table("source_catalog.schema.source_table")
+{% else %}# Replace this with the reader for your source system.
+source_df = spark.read.format("your-source").load(SOURCE_URI)
+{% endif %}
+{% if transformation_type == "SQL-compatible" %}source_df.createOrReplaceTempView("source_rows")
+output_df = spark.sql("SELECT * FROM source_rows")  # Add filters/transforms here.
+{% elif transformation_type == "custom / programmatic" %}output_df = source_df  # Apply the deterministic custom transform here.
+{% else %}output_df = source_df
+{% endif %}
+
+writer = (
+    output_df.repartition({{ write_tasks }})
+    .write.format("lance")
+    .option("max_row_per_file", {{ target_rows_per_fragment }})
+{% if include_max_batch_bytes %}    .option("max_batch_bytes", {{ max_batch_bytes }})
+{% endif %}{% if queued_write_buffer %}    .option("use_queued_write_buffer", "true")
+    .option("queue_depth", {{ queue_depth }})
+{% endif %})
+writer.mode({{ write_mode | pyrepr }}).save(TABLE_URI)
+{% if has_fts %}
+def build_initial_fts_index():
+    """Run once after the initial bulk write, not after each recurring append."""
+    spark.sql(
+        """ALTER TABLE {table}
+           CREATE INDEX text_idx USING fts (text)
+           WITH (base_tokenizer = 'simple', language = 'English',
+                 max_token_length = 40, lower_case = true, stem = true,
+                 remove_stop_words = true, ascii_folding = true,
+                 with_position = {{ phrase_search_required | lower }}, num_segments = {{ fts_segments }})""".format(
+            table=LANCE_TABLE
+        )
+    )
+{% endif %}{% if has_vector_index %}
+def build_initial_vector_index():
+    """Build independent segments with Spark, then publish one logical index."""
+    # Pause writers until the final segment commit completes.
+    driver_dataset = lance.dataset(TABLE_URI)
+    dataset_version = driver_dataset.version
+    fragment_ids = [fragment.fragment_id for fragment in driver_dataset.get_fragments()]
+    group_size = max(
+        1, (len(fragment_ids) + {{ vector_segments }} - 1) // {{ vector_segments }}
+    )
+    fragment_groups = [
+        fragment_ids[offset : offset + group_size]
+        for offset in range(0, len(fragment_ids), group_size)
+    ]
+
+    def build_segment(ids):
+        dataset = lance.dataset(TABLE_URI, version=dataset_version)
+        return dataset.create_index_uncommitted(
+            "vector",
+            index_type={{ vector_index_type | pyrepr }},
+            name="vector_idx",
+            metric={{ vector_metric | pyrepr }},
+            num_partitions={{ vector_partitions }},
+{% if pq_subvectors is not none %}            num_sub_vectors={{ pq_subvectors }},
+{% endif %}            fragment_ids=list(ids),
+        )
+
+    segments = spark.sparkContext.parallelize(fragment_groups, len(fragment_groups)).map(
+        build_segment
+    ).collect()
+    driver_dataset.commit_existing_index_segments("vector_idx", "vector", segments)
+{% endif %}

@@ -1,0 +1,17 @@
+-- Requires lance-trino >= 0.4.0 on Trino 476 or a compatible release.
+{% if include_target_rows_setting %}-- Catalog setting: lance.max_rows_per_file={{ target_rows_per_fragment }}
+{% endif %}{% if load_pattern == "one-time bulk load" %}-- One-time bulk load: use CTAS, verify fragments, then build indexes.
+{% elif load_pattern == "occasional large batch" %}-- Append each complete delivery; avoid many tiny INSERT operations.
+{% elif load_pattern == "regular batch" %}-- Buffer roughly {{ buffered_append_low }}-{{ buffered_append_high }} rows or more per INSERT.
+-- Compact on a threshold or schedule, not after every batch.
+{% else %}-- Stage frequent arrivals and flush roughly {{ buffered_append_low }}-{{ buffered_append_high }} rows per INSERT.
+-- Do not issue one INSERT per event.
+{% endif %}{% if transformation_type == "custom / programmatic" %}-- Apply the custom transform before this Trino write.
+{% endif %}
+{% if append_mode %}INSERT INTO lance.default.target_table
+{% else %}CREATE TABLE lance.default.target_table AS
+{% endif %}SELECT *
+FROM source_catalog.source_schema.source_table
+{% if transformation_type == "SQL-compatible" %}WHERE true;  -- Add SQL filters, joins, or projections here.
+{% else %};
+{% endif %}

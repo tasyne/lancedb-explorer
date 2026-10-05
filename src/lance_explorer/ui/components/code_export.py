@@ -36,6 +36,7 @@ def show_code_export(
     *,
     template_directory: str | None = None,
     label: str | None = None,
+    expanded: bool = False,
 ) -> None:
     """Render a labeled code-export expander with copy support."""
 
@@ -50,7 +51,7 @@ def show_code_export(
         renderer.registry.fingerprint(template_id),
     )
 
-    with st.expander(expander_label, expanded=False, icon=":material/code:"):
+    with st.expander(expander_label, expanded=expanded, icon=":material/code:"):
         st.caption(spec.title, help=help_text("code_export"))
         st.code(code, language=spec.language, line_numbers=False)
         browser_copy_button(code, key_prefix=template_id)

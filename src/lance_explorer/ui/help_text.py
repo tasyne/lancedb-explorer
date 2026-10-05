@@ -48,8 +48,8 @@ HELP: dict[str, str] = {
         "this table version."
     ),
     "statistics": (
-        "Physical table statistics help diagnose fragmentation and storage layout. Values depend "
-        "on the installed LanceDB version and table format."
+        "Physical table statistics help diagnose fragmentation and storage layout. Available "
+        "values depend on the table format and index types."
     ),
     "versions": (
         "Versions make reads reproducible and allow restoration. Retain versions while other "

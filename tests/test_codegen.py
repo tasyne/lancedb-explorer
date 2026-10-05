@@ -15,9 +15,9 @@ def test_connection_template_uses_runtime_storage_values_not_credentials(monkeyp
 
     assert "UPath('s3://bucket/database')" in code
     assert "import os" in code
-    assert 'AWS_ENDPOINT = os.getenv("AWS_ENDPOINT", \'http://minio.local:9000\')' in code
-    assert 'AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION", \'us-west-2\')' in code
-    assert 'ALLOW_HTTP = os.getenv("ALLOW_HTTP", \'true\')' in code
+    assert "AWS_ENDPOINT = os.getenv(\"AWS_ENDPOINT\", 'http://minio.local:9000')" in code
+    assert "AWS_DEFAULT_REGION = os.getenv(\"AWS_DEFAULT_REGION\", 'us-west-2')" in code
+    assert "ALLOW_HTTP = os.getenv(\"ALLOW_HTTP\", 'true')" in code
     assert '"endpoint": AWS_ENDPOINT' in code
     assert "AWS_ACCESS_KEY_ID" not in code
     assert "AWS_SECRET_ACCESS_KEY" not in code
@@ -29,7 +29,7 @@ def test_connection_template_can_fallback_to_aws_region(monkeypatch) -> None:
 
     code = TemplateRenderer().render("connect", {"database_uri": "s3://bucket/database"})
 
-    assert 'AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION", \'eu-central-1\')' in code
+    assert "AWS_DEFAULT_REGION = os.getenv(\"AWS_DEFAULT_REGION\", 'eu-central-1')" in code
 
 
 def test_index_template_renders_runtime_configuration() -> None:
@@ -121,15 +121,14 @@ def test_vector_index_template_renders_vector_configuration() -> None:
     assert "embedding_ivf_hnsw_sq_idx" in code
 
 
-def test_open_table_template_uses_checkout_for_versions() -> None:
+def test_open_table_template_passes_numeric_versions_to_open_table() -> None:
     code = TemplateRenderer().render(
         "open_table",
         {"table_uri": "/tmp/db/items.lance", "open_version": 2},
     )
 
-    assert "db.open_table(table_path.name.removesuffix(\".lance\"))" in code
-    assert "version=open_version" not in code
-    assert "table.checkout(open_version)" in code
+    assert "version=open_version if isinstance(open_version, int) else None" in code
+    assert "if isinstance(open_version, str):" in code
 
 
 def test_open_table_template_can_checkout_tags() -> None:
@@ -156,7 +155,8 @@ def test_open_table_template_supports_namespace_references() -> None:
 
     assert "lancedb.connect_namespace" in code
     assert "namespace_path = components[:-1]" in code
-    assert "table = db.open_table(table_name, namespace_path=namespace_path)" in code
+    assert "namespace_path=namespace_path" in code
+    assert "version=open_version if isinstance(open_version, int) else None" in code
 
 
 def test_create_namespace_table_template_renders_namespace_path() -> None:
@@ -182,9 +182,9 @@ def test_insert_arrow_blob_template_renders_blob_v2_example() -> None:
         {"table_uri": "/tmp/db/items.lance", "open_version": None},
     )
 
-    assert "blob_field(\"headshot_full_bytes\")" in code
+    assert 'blob_field("headshot_full_bytes")' in code
     assert "blob_array([full_image_bytes])" in code
-    assert "data_storage_version=\"2.2\"" in code
+    assert '"new_table_data_storage_version": "2.2"' in code
     assert "table.add(batch)" in code
 
 
@@ -210,6 +210,14 @@ def test_insert_pydantic_template_renders_model_validation() -> None:
     assert "model_dump()" in code
 
 
+def test_schema_lance_model_template_renders_standalone_source() -> None:
+    source = "from lancedb.pydantic import LanceModel\n\nclass Item(LanceModel):\n    id: int\n"
+
+    code = TemplateRenderer().render("schema_lance_model", {"model_source": source})
+
+    assert code == source
+
+
 def test_merge_upsert_template_renders_merge_insert_builder() -> None:
     code = TemplateRenderer().render(
         "merge_upsert",
@@ -232,7 +240,7 @@ def test_update_rows_template_renders_predicate_update() -> None:
     assert "values_sql" in code
 
 
-def test_compare_template_uses_checkout_for_versions() -> None:
+def test_compare_template_passes_numeric_versions_to_open_table() -> None:
     code = TemplateRenderer().render(
         "compare_tables",
         {
@@ -246,9 +254,8 @@ def test_compare_template_uses_checkout_for_versions() -> None:
         },
     )
 
-    assert "db.open_table(path.name.removesuffix(\".lance\"))" in code
-    assert "version=" not in code
-    assert "table.checkout(version)" in code
+    assert "version=version if isinstance(version, int) else None" in code
+    assert "if isinstance(version, str):" in code
 
 
 def test_hybrid_query_template_uses_text_vector_and_optional_rerank() -> None:
@@ -328,6 +335,11 @@ def test_all_python_templates_render_as_valid_python() -> None:
         "insert_arrow_blobs": {"table_uri": "/tmp/db/items.lance", "open_version": None},
         "insert_pandas": {"table_uri": "/tmp/db/items.lance", "open_version": None},
         "insert_pydantic": {"table_uri": "/tmp/db/items.lance", "open_version": None},
+        "schema_lance_model": {
+            "model_source": (
+                "from lancedb.pydantic import LanceModel\n\nclass Item(LanceModel):\n    id: int\n"
+            )
+        },
         "merge_upsert": {"table_uri": "/tmp/db/items.lance", "open_version": None},
         "update_rows": {"table_uri": "/tmp/db/items.lance", "open_version": None},
         "filter_query": {
@@ -404,7 +416,144 @@ def test_all_python_templates_render_as_valid_python() -> None:
             "version": 2,
         },
         "drop_table": {"table_uri": "/tmp/db/items.lance"},
+        "scaling_spark": {
+            "source_type": "S3 / Parquet / files",
+            "transformation_type": "SQL-compatible",
+            "load_pattern": "regular batch",
+            "buffered_append_low": 500_000,
+            "buffered_append_high": 1_000_000,
+            "write_tasks": 144,
+            "target_rows_per_fragment": 750_000,
+            "include_max_batch_bytes": True,
+            "max_batch_bytes": 268_435_456,
+            "write_mode": "append",
+            "queued_write_buffer": True,
+            "queue_depth": 2,
+            "has_fts": True,
+            "fts_segments": 12,
+            "phrase_search_required": True,
+            "has_vector_index": True,
+            "vector_index_type": "IVF_PQ",
+            "vector_segments": 12,
+            "vector_partitions": 2048,
+            "pq_subvectors": 96,
+            "vector_metric": "cosine",
+        },
+        "scaling_trino": {
+            "append_mode": True,
+            "transformation_type": "SQL-compatible",
+            "load_pattern": "regular batch",
+            "buffered_append_low": 500_000,
+            "buffered_append_high": 1_000_000,
+            "include_target_rows_setting": True,
+            "target_rows_per_fragment": 750_000,
+        },
+        "scaling_python": {
+            "target_rows_per_fragment": 750_000,
+            "recurring_load": True,
+            "load_pattern": "regular batch",
+            "has_indexes": True,
+        },
     }
 
     for template_id, context in contexts.items():
-        ast.parse(renderer.render(template_id, context), filename=template_id)
+        rendered = renderer.render(template_id, context)
+        if renderer.registry.get(template_id).language == "python":
+            ast.parse(rendered, filename=template_id)
+
+
+def test_scaling_templates_render_planner_values() -> None:
+    renderer = TemplateRenderer()
+    spark = renderer.render(
+        "scaling_spark",
+        {
+            "source_type": "S3 / Parquet / files",
+            "transformation_type": "none / copy",
+            "load_pattern": "frequent small appends",
+            "buffered_append_low": 500_000,
+            "buffered_append_high": 750_000,
+            "write_tasks": 96,
+            "target_rows_per_fragment": 750_000,
+            "include_max_batch_bytes": True,
+            "max_batch_bytes": 134_217_728,
+            "write_mode": "append",
+            "queued_write_buffer": False,
+            "queue_depth": 2,
+            "has_fts": False,
+            "fts_segments": 1,
+            "phrase_search_required": False,
+            "has_vector_index": True,
+            "vector_index_type": "IVF_PQ",
+            "vector_segments": 8,
+            "vector_partitions": 1024,
+            "pq_subvectors": 48,
+            "vector_metric": "cosine",
+        },
+    )
+    trino = renderer.render(
+        "scaling_trino",
+        {
+            "append_mode": False,
+            "transformation_type": "SQL-compatible",
+            "load_pattern": "one-time bulk load",
+            "buffered_append_low": 750_000,
+            "buffered_append_high": 750_000,
+            "include_target_rows_setting": True,
+            "target_rows_per_fragment": 750_000,
+        },
+    )
+    python = renderer.render(
+        "scaling_python",
+        {
+            "target_rows_per_fragment": 750_000,
+            "recurring_load": True,
+            "load_pattern": "frequent small appends",
+            "has_indexes": True,
+        },
+    )
+
+    assert ".repartition(96)" in spark
+    assert '.option("max_batch_bytes", 134217728)' in spark
+    assert "CREATE TABLE lance.default.target_table AS" in trino
+    assert "create_index_uncommitted" in spark
+    assert "num_sub_vectors=48" in spark
+    assert "commit_existing_index_segments" in spark
+    assert "Frequent arrivals" in spark
+    assert "defer_index_remap=True" in python
+    assert "dataset.optimize.optimize_indices()" in python
+    assert "lance_ray" not in spark + trino + python
+
+
+def test_scaling_spark_template_omits_unselected_tuning_and_indexes() -> None:
+    code = TemplateRenderer().render(
+        "scaling_spark",
+        {
+            "source_type": "S3 / Parquet / files",
+            "transformation_type": "none / copy",
+            "load_pattern": "one-time bulk load",
+            "buffered_append_low": 750_000,
+            "buffered_append_high": 750_000,
+            "write_tasks": 96,
+            "target_rows_per_fragment": 750_000,
+            "include_max_batch_bytes": False,
+            "max_batch_bytes": 268_435_456,
+            "write_mode": "overwrite",
+            "queued_write_buffer": False,
+            "queue_depth": 2,
+            "has_fts": False,
+            "fts_segments": 1,
+            "phrase_search_required": False,
+            "has_vector_index": False,
+            "vector_index_type": "IVF_PQ",
+            "vector_segments": 1,
+            "vector_partitions": 1,
+            "pq_subvectors": None,
+            "vector_metric": "l2",
+        },
+    )
+
+    assert "max_batch_bytes" not in code
+    assert "queued_write_buffer" not in code
+    assert "CREATE INDEX" not in code
+    assert "create_index_uncommitted" not in code
+    assert "import lance" not in code

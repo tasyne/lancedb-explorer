@@ -7,6 +7,7 @@ import streamlit as st
 from lance_explorer.paths import PathEntry, list_children
 from lance_explorer.repository import LanceRepository
 from lance_explorer.schema_diff import schema_to_rows
+from lance_explorer.schema_model import generate_lance_model
 
 
 @st.cache_data(ttl=5, max_entries=256, show_spinner=False)
@@ -80,6 +81,14 @@ def cached_snapshot(table_uri: str, version: int | None, generation: int) -> dic
     return LanceRepository().snapshot(table_uri, version=version)
 
 
+@st.cache_data(ttl=20, max_entries=256, show_spinner=False)
+def cached_health_snapshot(table_uri: str, generation: int) -> dict[str, Any]:
+    """Cache a bounded health snapshot for the latest table version."""
+
+    del generation
+    return LanceRepository().health_snapshot(table_uri)
+
+
 @st.cache_data(ttl=20, max_entries=512, show_spinner=False)
 def cached_versions(table_uri: str, generation: int) -> list[dict[str, Any]]:
     """Cache table version metadata."""
@@ -107,6 +116,26 @@ def cached_schema_rows(
     del generation
     schema = LanceRepository().get_schema(table_uri, version=version)
     return schema_to_rows(schema)
+
+
+@st.cache_data(ttl=20, max_entries=512, show_spinner=False)
+def cached_lance_model_export(
+    table_uri: str,
+    version: int | str | None,
+    table_name: str,
+    resolved_version: object,
+    generation: int,
+) -> dict[str, Any]:
+    """Cache standalone LanceModel source for a selected table schema."""
+
+    del generation
+    schema = LanceRepository().get_schema(table_uri, version=version)
+    export = generate_lance_model(schema, table_name, version=resolved_version)
+    return {
+        "model_name": export.model_name,
+        "source": export.source,
+        "notes": list(export.notes),
+    }
 
 
 def children_for_uri(uri: str, generation: int) -> list[PathEntry]:

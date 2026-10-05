@@ -29,6 +29,11 @@ templates:
     title: Validate rows with Pydantic before append
     language: python
     required_context: [table_uri, open_version]
+  schema_lance_model:
+    file: schema_lance_model.py.j2
+    title: Standalone LanceModel for the selected table
+    language: python
+    required_context: [model_source]
   merge_upsert:
     file: merge_upsert.py.j2
     title: Merge or upsert rows by key
@@ -94,3 +99,18 @@ templates:
     title: Drop a table
     language: python
     required_context: [table_uri]
+  scaling_spark:
+    file: scaling_spark.py.j2
+    title: Spark ingestion starter
+    language: python
+    required_context: [source_type, transformation_type, load_pattern, buffered_append_low, buffered_append_high, write_tasks, target_rows_per_fragment, include_max_batch_bytes, max_batch_bytes, write_mode, queued_write_buffer, queue_depth, has_fts, fts_segments, phrase_search_required, has_vector_index, vector_index_type, vector_segments, vector_partitions, pq_subvectors, vector_metric]
+  scaling_trino:
+    file: scaling_trino.sql.j2
+    title: Trino ingestion starter
+    language: sql
+    required_context: [append_mode, transformation_type, load_pattern, buffered_append_low, buffered_append_high, include_target_rows_setting, target_rows_per_fragment]
+  scaling_python:
+    file: scaling_python.py.j2
+    title: Python maintenance starter
+    language: python
+    required_context: [target_rows_per_fragment, recurring_load, load_pattern, has_indexes]

@@ -17,11 +17,18 @@ if table_reference.startswith("lance-ns://"):
         {"root": root},
         storage_options=storage_options or None,
     )
-    table = db.open_table(table_name, namespace_path=namespace_path)
+    table = db.open_table(
+        table_name,
+        namespace_path=namespace_path,
+        version=open_version if isinstance(open_version, int) else None,
+    )
 else:
     # Direct table URIs open from local disk, S3, or another object-store path.
     table_path = UPath(table_reference)
     db = lancedb.connect(str(table_path.parent), storage_options=storage_options or None)
-    table = db.open_table(table_path.name.removesuffix(".lance"))
-if open_version is not None:
+    table = db.open_table(
+        table_path.name.removesuffix(".lance"),
+        version=open_version if isinstance(open_version, int) else None,
+    )
+if isinstance(open_version, str):
     table.checkout(open_version)

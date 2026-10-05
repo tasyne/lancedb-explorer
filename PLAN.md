@@ -2,7 +2,7 @@
 
 **Status:** Implemented MVP with focused local validation.  
 **Runtime target:** Python 3.12 through 3.13.  
-**Primary stack:** Streamlit, LanceDB 0.33.x through 0.34.x, PyArrow, pandas, Universal Pathlib, s3fs, Jinja, Faker.
+**Primary stack:** Streamlit, LanceDB 0.39.x, PyArrow, pandas, Universal Pathlib, s3fs, Jinja, Faker.
 
 ## Purpose
 
@@ -17,7 +17,6 @@ The app is deliberately lightweight:
 - no model download, embedding generation, or reranking pipeline;
 - no unbounded query, preview, or comparison workflow;
 - no mutation triggered merely by Streamlit rerendering.
-- no hard dependency on Blob v2 when LanceDB 0.33.x is the newest installable package on an older OS.
 
 ## Current Capabilities
 
@@ -61,7 +60,7 @@ The app is deliberately lightweight:
 
 ### Indexes
 
-- Discover supported scalar, text, and vector index classes from the installed LanceDB SDK.
+- Use LanceDB 0.39's unified scalar, text, and vector index configuration classes.
 - Offer compatible B-tree, bitmap, label-list, FM, FTS, IVF, HNSW, and quantized vector options based on Arrow field type.
 - Offer FTS presets for English, ICU multilingual, packaged Jieba, and externally supplied
   Lindera tokenization for Japanese and Korean.
@@ -93,8 +92,8 @@ The app is deliberately lightweight:
 - Demo rows include a 64-dimensional `embedding` vector, `embedding_vector_idx`, and
   `bio_multilingual_fts_idx`.
 - Demo rows include bundled PNG headshots: thumbnails use inline Arrow `binary`, and full images
-  use Lance Blob v2 columns created with file format `data_storage_version="2.2"` when available,
-  falling back to Arrow `binary` on LanceDB 0.33.x.
+  use Lance Blob v2 columns created with the connection storage option
+  `new_table_data_storage_version="2.2"`.
 - Multiple Lance versions are created by default so schema/history/diff features have data to demonstrate.
 
 ## Architecture
@@ -108,7 +107,7 @@ src/lance_explorer/
   repository.py             LanceDB API boundary and query/mutation limits
   comparison.py             Bounded metadata and row comparison
   schema_diff.py            Arrow schema flattening and diffing
-  index_registry.py         Index discovery, compatibility, and configuration metadata
+  index_registry.py         Index type matching and configuration metadata
   demo_data.py              Faker-backed demo table generation
   docs_index.py             llms.txt parsing and grouping
   docs_server.py            Safe zip extraction and loopback static serving
@@ -121,7 +120,7 @@ src/lance_explorer/
   templates/python/         Packaged code-export templates
 ```
 
-The repository layer owns LanceDB calls. Pages coordinate inputs and presentation. Domain modules own path parsing, schema comparison, row comparison, index compatibility, docs indexing, and code rendering. This keeps storage behavior testable outside Streamlit.
+The repository layer owns LanceDB calls. Pages coordinate inputs and presentation. Domain modules own path parsing, schema comparison, row comparison, index type matching, docs indexing, and code rendering. This keeps storage behavior testable outside Streamlit.
 
 Fresh LanceDB table handles are opened per repository operation. This prevents checked-out versions or mutable table state from leaking through Streamlit's resource cache.
 
@@ -207,8 +206,8 @@ Prioritize only when the workflows justify the complexity:
 
 ## Engineering Guardrails
 
-- Keep LanceDB SDK compatibility logic in `repository.py` and `index_registry.py`, not spread across pages.
+- Keep LanceDB SDK calls in `repository.py` and index construction in `index_registry.py`, not spread across pages.
 - Keep Streamlit pages thin: gather inputs, call domain/repository helpers, and render results.
 - Prefer small shared UI components for repeated browser or dataframe behavior.
 - Use concise docstrings on public functions/classes; reserve comments for SDK quirks, security checks, or rerun-sensitive state handling.
-- Add tests when behavior crosses module boundaries, depends on LanceDB version quirks, or protects copy/paste/demo workflows.
+- Add tests when behavior crosses module boundaries, depends on LanceDB API semantics, or protects copy/paste/demo workflows.

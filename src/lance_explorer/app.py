@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import streamlit as st
 
-from lance_explorer.compat import lancedb_compatibility_warning
 from lance_explorer.config import AppConfig
 from lance_explorer.language_models import ensure_packaged_language_model_home
 from lance_explorer.table_refs import is_namespace_table_ref, table_display_label
@@ -65,6 +64,14 @@ def maintenance_page() -> None:
     from lance_explorer.ui.pages import maintenance
 
     maintenance.render(AppConfig.from_env())
+
+
+def scaling_page() -> None:
+    """Render distributed ingestion and indexing sizing recommendations."""
+
+    from lance_explorer.ui.pages import scaling
+
+    scaling.render(AppConfig.from_env())
 
 
 def docs_page() -> None:
@@ -188,8 +195,6 @@ def main() -> None:
     st.set_option("client.toolbarMode", "viewer")
     st.set_page_config(page_title="Lance Explorer", page_icon="🗂️", layout="wide")
     _install_global_css()
-    if warning := lancedb_compatibility_warning():
-        st.warning(warning, icon=":material/warning:")
     config = AppConfig.from_env()
     initialize_state(config)
 
@@ -207,6 +212,7 @@ def main() -> None:
         st.Page(compare_page, title="Compare", icon="⚖️"),
         st.Page(indexes_page, title="Indexes", icon="🔖"),
         st.Page(maintenance_page, title="Maintenance", icon="🛠️"),
+        st.Page(scaling_page, title="Scaling Recommendations", icon=":material/monitoring:"),
         st.Page(docs_page, title="Docs", icon="📚"),
     ]
     st.navigation(pages).run()

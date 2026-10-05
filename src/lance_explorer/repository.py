@@ -11,10 +11,13 @@ from urllib.parse import quote, unquote, urlparse
 import lancedb
 import pandas as pd
 import pyarrow as pa
+from lance_namespace_urllib3_client.models.register_table_request import (
+    RegisterTableRequest,
+)
 from lancedb.rerankers import RRFReranker
 
 from lance_explorer.config import lancedb_storage_options_from_env
-from lance_explorer.index_compat import create_table_index
+from lance_explorer.index_registry import create_table_index
 from lance_explorer.language_models import (
     ensure_packaged_language_model_home,
 )
@@ -105,6 +108,54 @@ def _index_columns(config: Any) -> list[str]:
     )
 
 
+def _index_rows(table: Any) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for config in table.list_indices():
+        item = _public_object_dict(config)
+        name = _index_name(config)
+        item.setdefault("name", name)
+        item.setdefault("columns", _index_columns(config))
+        if name:
+            stats = table.index_stats(name)
+            if stats is not None:
+                item["statistics"] = _public_object_dict(stats)
+        output.append(_json_safe(item))
+    return output
+
+
+def _health_schema_fields(schema: pa.Schema, blob_columns: set[str]) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    for field in schema:
+        data_type = field.type
+        vector_storage: str | None = None
+        vector_dimension: int | None = None
+        value_type: pa.DataType | None = None
+        if pa.types.is_fixed_size_list(data_type):
+            value_type = data_type.value_type
+            vector_storage = "fixed"
+            vector_dimension = data_type.list_size
+        elif pa.types.is_list(data_type) or pa.types.is_large_list(data_type):
+            value_type = data_type.value_type
+            vector_storage = "variable"
+        if value_type is not None and not (
+            pa.types.is_floating(value_type) or pa.types.is_integer(value_type)
+        ):
+            vector_storage = None
+            vector_dimension = None
+        fields.append(
+            {
+                "name": field.name,
+                "type": str(data_type),
+                "nullable": field.nullable,
+                "vector_storage": vector_storage,
+                "vector_dimension": vector_dimension,
+                "is_binary": pa.types.is_binary(data_type) or pa.types.is_large_binary(data_type),
+                "is_blob": field.name in blob_columns,
+            }
+        )
+    return fields
+
+
 def _columns_with_scores(
     columns: list[str] | None,
     score_columns: tuple[str, ...],
@@ -177,20 +228,6 @@ def _import_relative_location(
     return f"{encoded}.lance"
 
 
-def _namespace_table_id(location: NamespaceTableLocation) -> list[str]:
-    """Return the namespace API identity for a namespace table reference."""
-
-    return [*location.namespace_path, location.table_name]
-
-
-def _registered_storage_path(root: str, location: str):
-    """Resolve a registered namespace location to the path Lance should delete."""
-
-    if has_uri_scheme(location):
-        return make_upath(location)
-    return make_upath(str(make_upath(root) / location))
-
-
 class LanceRepository:
     """Thin synchronous LanceDB adapter.
 
@@ -213,14 +250,9 @@ class LanceRepository:
 
     @staticmethod
     def _connect_namespace(implementation: str, properties: dict[str, str]):
-        """Open a namespace-backed LanceDB connection when the SDK supports it."""
+        """Open a namespace-backed LanceDB connection."""
 
         ensure_packaged_language_model_home()
-        if not hasattr(lancedb, "connect_namespace"):
-            raise RuntimeError(
-                "This LanceDB version does not expose namespace lifecycle APIs. "
-                "Install lancedb>=0.34.0 to browse and manage namespaces."
-            )
         return lancedb.connect_namespace(
             implementation,
             properties,
@@ -234,21 +266,21 @@ class LanceRepository:
         """Open a Lance table, optionally checked out at a specific version."""
 
         resolved = resolve_table_location(table_uri)
+        open_version = version if isinstance(version, int) else None
         if resolved.namespace:
             # Namespace references must be resolved through LanceDB's catalog API.
             db = self._connect_namespace_location(resolved.namespace)
             table = db.open_table(
                 resolved.namespace.table_name,
                 namespace_path=list(resolved.namespace.namespace_path),
+                version=open_version,
             )
         else:
             # Direct table URIs open from local disk, S3, or another object-store path.
             assert resolved.direct is not None
             db = self._connect(resolved.direct.database_uri)
-            table = db.open_table(resolved.direct.table_name)
-        if version is not None:
-            # `open_table(version=...)` exists in newer LanceDB releases, but `checkout`
-            # has been the stable time-travel path across more SDK versions.
+            table = db.open_table(resolved.direct.table_name, version=open_version)
+        if isinstance(version, str):
             table.checkout(version)
         return table
 
@@ -298,8 +330,8 @@ class LanceRepository:
                 page_token=page_token,
                 limit=min(1_000, 10_000 - len(names)),
             )
-            names.extend(str(item) for item in getattr(response, "namespaces", []))
-            page_token = getattr(response, "page_token", None)
+            names.extend(str(item) for item in response.namespaces)
+            page_token = response.page_token
             if not page_token:
                 break
         return names
@@ -322,8 +354,8 @@ class LanceRepository:
                 page_token=page_token,
                 limit=min(1_000, 10_000 - len(names)),
             )
-            names.extend(str(item) for item in getattr(response, "tables", []))
-            page_token = getattr(response, "page_token", None)
+            names.extend(str(item) for item in response.tables)
+            page_token = response.page_token
             if not page_token:
                 break
         return names
@@ -417,17 +449,14 @@ class LanceRepository:
         path = tuple(namespace_path)
         if not path:
             return True
-        parent = path[:-1]
         try:
             return path[-1] in self.list_namespaces(
-                root, parent, implementation=implementation
+                root, path[:-1], implementation=implementation
             )
-        except Exception:
-            try:
-                self.describe_namespace(root, path, implementation=implementation)
-                return True
-            except Exception:
+        except RuntimeError as exc:
+            if "not found" in str(exc).lower():
                 return False
+            raise
 
     def ensure_namespace_path(
         self,
@@ -660,12 +689,6 @@ class LanceRepository:
         """Register a catalog-relative physical table location."""
 
         try:
-            from lance_namespace_urllib3_client.models.register_table_request import (
-                RegisterTableRequest,
-            )
-        except Exception:
-            return None
-        try:
             response = namespace_db.namespace_client().register_table(
                 RegisterTableRequest(
                     id=[*namespace_path, table_name],
@@ -692,11 +715,8 @@ class LanceRepository:
         """Return table version tags as rows suitable for display."""
 
         table = self.open_table(table_uri)
-        tags = getattr(table, "tags", None)
-        if tags is None:
-            return []
         rows: list[dict[str, Any]] = []
-        for name, metadata in tags.list().items():
+        for name, metadata in table.tags.list().items():
             item = _public_object_dict(metadata)
             item["tag"] = str(name)
             rows.append(_json_safe(item))
@@ -708,18 +728,97 @@ class LanceRepository:
         """Return index definitions and available statistics for a table."""
 
         table = self.open_table(table_uri, version=version)
-        output: list[dict[str, Any]] = []
-        for config in table.list_indices():
-            item = _public_object_dict(config)
-            name = _index_name(config)
-            item.setdefault("name", name)
-            item.setdefault("columns", _index_columns(config))
-            if name:
-                stats = table.index_stats(name)
-                if stats is not None:
-                    item["statistics"] = _public_object_dict(stats)
-            output.append(_json_safe(item))
-        return output
+        return _index_rows(table)
+
+    def health_snapshot(self, table_uri: str) -> dict[str, Any]:
+        """Collect bounded metadata used to diagnose current table health."""
+
+        table = self.open_table(table_uri)
+        errors: list[str] = []
+        statistics: dict[str, Any] = {}
+        try:
+            statistics = _public_object_dict(table.stats())
+        except Exception as exc:
+            errors.append(f"Table statistics were unavailable: {exc}")
+
+        row_count = statistics.get("num_rows")
+        if not isinstance(row_count, int):
+            try:
+                row_count = table.count_rows()
+            except Exception as exc:
+                row_count = 0
+                errors.append(f"Row count was unavailable: {exc}")
+
+        fragments: list[dict[str, Any]] = []
+        try:
+            for fragment in table.to_lance().get_fragments():
+                metadata = fragment.metadata
+                physical_rows = int(getattr(metadata, "physical_rows", 0) or 0)
+                deleted_rows = int(getattr(metadata, "num_deletions", 0) or 0)
+                data_bytes = sum(
+                    int(getattr(data_file, "file_size_bytes", 0) or 0)
+                    for data_file in getattr(metadata, "files", [])
+                )
+                fragments.append(
+                    {
+                        "fragment_id": int(getattr(metadata, "id", fragment.fragment_id)),
+                        "physical_rows": physical_rows,
+                        "deleted_rows": deleted_rows,
+                        "live_rows": max(0, physical_rows - deleted_rows),
+                        "data_bytes": data_bytes,
+                        "data_files": len(getattr(metadata, "files", [])),
+                    }
+                )
+        except Exception as exc:
+            errors.append(f"Fragment details were unavailable: {exc}")
+
+        try:
+            indexes = _index_rows(table)
+        except Exception as exc:
+            indexes = []
+            errors.append(f"Index statistics were unavailable: {exc}")
+
+        try:
+            versions = [_json_safe(item) for item in table.list_versions()]
+        except Exception as exc:
+            versions = []
+            errors.append(f"Version history was unavailable: {exc}")
+
+        tags: list[dict[str, Any]] = []
+        try:
+            for name, metadata in table.tags.list().items():
+                item = _public_object_dict(metadata)
+                item["tag"] = str(name)
+                tags.append(_json_safe(item))
+        except Exception as exc:
+            errors.append(f"Version tags were unavailable: {exc}")
+
+        try:
+            blob_columns = set(table.blob_columns())
+        except Exception:
+            blob_columns = set()
+
+        uses_v2_manifest_paths: bool | None
+        try:
+            uses_v2_manifest_paths = bool(table.uses_v2_manifest_paths())
+        except Exception:
+            uses_v2_manifest_paths = None
+
+        return {
+            "table_uri": table_uri,
+            "resolved_uri": table.uri,
+            "name": table.name,
+            "version": table.version,
+            "row_count": row_count,
+            "statistics": statistics,
+            "fragments": fragments,
+            "indexes": indexes,
+            "versions": versions,
+            "tags": sorted(tags, key=lambda item: str(item.get("tag", ""))),
+            "schema_fields": _health_schema_fields(table.schema, blob_columns),
+            "uses_v2_manifest_paths": uses_v2_manifest_paths,
+            "inspection_errors": errors,
+        }
 
     def snapshot(self, table_uri: str, version: int | str | None = None) -> dict[str, Any]:
         """Collect bounded metadata used by the Table and Compare pages."""
@@ -952,15 +1051,12 @@ class LanceRepository:
         if not tag_name:
             raise ValueError("Tag name cannot be empty")
         table = self.open_table(table_uri)
-        tags = getattr(table, "tags", None)
-        if tags is None:
-            raise ValueError("This LanceDB version does not expose table tags.")
-        existing = tags.list()
+        existing = table.tags.list()
         action = "updated" if tag_name in existing else "created"
         if action == "updated":
-            tags.update(tag_name, version)
+            table.tags.update(tag_name, version)
         else:
-            tags.create(tag_name, version)
+            table.tags.create(tag_name, version)
         return {"status": action, "tag": tag_name, "version": version}
 
     def delete_tag(self, table_uri: str, tag: str) -> dict[str, Any]:
@@ -970,91 +1066,8 @@ class LanceRepository:
         if not tag_name:
             raise ValueError("Tag name cannot be empty")
         table = self.open_table(table_uri)
-        tags = getattr(table, "tags", None)
-        if tags is None:
-            raise ValueError("This LanceDB version does not expose table tags.")
-        tags.delete(tag_name)
+        table.tags.delete(tag_name)
         return {"status": "deleted", "tag": tag_name}
-
-    def _describe_namespace_table_location(
-        self,
-        namespace_db: Any,
-        location: NamespaceTableLocation,
-    ) -> str | None:
-        """Return the storage location registered for a namespace table."""
-
-        try:
-            from lance_namespace_urllib3_client.models.describe_table_request import (
-                DescribeTableRequest,
-            )
-        except Exception:
-            return None
-        try:
-            response = namespace_db.namespace_client().describe_table(
-                DescribeTableRequest(
-                    id=_namespace_table_id(location),
-                    with_table_uri=True,
-                )
-            )
-        except Exception:
-            return None
-        return str(getattr(response, "location", "") or getattr(response, "table_uri", "") or "")
-
-    def _deregister_namespace_table(
-        self,
-        namespace_db: Any,
-        location: NamespaceTableLocation,
-    ) -> dict[str, Any] | None:
-        """Remove a namespace catalog entry without touching table storage."""
-
-        try:
-            from lance_namespace_urllib3_client.models.deregister_table_request import (
-                DeregisterTableRequest,
-            )
-        except Exception:
-            return None
-        try:
-            response = namespace_db.namespace_client().deregister_table(
-                DeregisterTableRequest(id=_namespace_table_id(location))
-            )
-        except Exception as exc:
-            if "Table not found" in str(exc):
-                return {"status": "already_absent"}
-            raise
-        return _public_object_dict(response)
-
-    def _repair_namespace_drop_after_location_error(
-        self,
-        namespace_db: Any,
-        location: NamespaceTableLocation,
-        registered_location: str | None,
-        original_error: Exception,
-    ) -> dict[str, Any] | None:
-        """Work around LanceDB 0.34 slash-encoding failures during namespace drops."""
-
-        error_text = str(original_error)
-        if (
-            not registered_location
-            or "Failed to delete table directory" not in error_text
-            or "%2F" not in error_text
-        ):
-            return None
-
-        storage_path = _registered_storage_path(location.root, registered_location)
-        removed_storage = False
-        if storage_path.exists():
-            storage_path.fs.rm(str(storage_path), recursive=True)
-            removed_storage = True
-        deregistered = self._deregister_namespace_table(namespace_db, location)
-        return {
-            "status": "dropped",
-            "table": location.table_name,
-            "method": "manual namespace deregistration after SDK drop fallback",
-            "removed_storage": removed_storage,
-            "registered_location": registered_location,
-            "deregistered": deregistered,
-            "sdk_error": error_text,
-        }
 
     def drop_table(self, table_uri: str) -> dict[str, Any]:
         """Drop a Lance table from its parent database."""
@@ -1062,25 +1075,10 @@ class LanceRepository:
         resolved = resolve_table_location(table_uri)
         if resolved.namespace:
             db = self._connect_namespace_location(resolved.namespace)
-            registered_location = self._describe_namespace_table_location(
-                db,
-                resolved.namespace,
+            db.drop_table(
+                resolved.namespace.table_name,
+                namespace_path=list(resolved.namespace.namespace_path),
             )
-            try:
-                db.drop_table(
-                    resolved.namespace.table_name,
-                    namespace_path=list(resolved.namespace.namespace_path),
-                )
-            except Exception as exc:
-                repaired = self._repair_namespace_drop_after_location_error(
-                    db,
-                    resolved.namespace,
-                    registered_location,
-                    exc,
-                )
-                if repaired is not None:
-                    return repaired
-                raise
             return {"status": "dropped", "table": resolved.namespace.table_name}
         assert resolved.direct is not None
         db = self._connect(resolved.direct.database_uri)

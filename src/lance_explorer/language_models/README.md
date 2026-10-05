@@ -14,11 +14,8 @@ dictionaries outside this repository and set `LANCE_LANGUAGE_MODEL_HOME` plus `L
 For downloaded Jieba archives, set `LANCE_LANGUAGE_MODEL_HOME` to the extracted `language_models`
 directory.
 
-LanceDB version matters for demo defaults. Lance Explorer uses the multilingual ICU FTS preset on
-LanceDB `0.34.0+`; on `0.33.x`, demo table creation falls back to the English/simple tokenizer
-because older public APIs and tokenizer support are narrower. Generated index snippets include
-compatibility fallbacks where the installed SDK exposes older helper methods instead of
-`create_index(..., config=...)`.
+Lance Explorer's demo uses the multilingual ICU FTS preset. Generated index snippets use the
+current `create_index(column, config=...)` API directly.
 
 To refresh from source, set `LANCE_LANGUAGE_MODEL_HOME` to this directory, install `lindera-cli`,
 and use Lance's downloader:

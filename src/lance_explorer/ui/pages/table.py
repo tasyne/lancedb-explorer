@@ -8,7 +8,12 @@ import streamlit as st
 from lance_explorer.config import AppConfig
 from lance_explorer.repository import LanceRepository
 from lance_explorer.schema_diff import diff_schemas
-from lance_explorer.ui.cache import cached_snapshot, cached_tags, cached_versions
+from lance_explorer.ui.cache import (
+    cached_lance_model_export,
+    cached_snapshot,
+    cached_tags,
+    cached_versions,
+)
 from lance_explorer.ui.components.code_export import show_code_export
 from lance_explorer.ui.components.common import parse_version, table_uri_control, template_directory
 from lance_explorer.ui.components.dataframe import show_dataframe, vector_display_columns
@@ -109,8 +114,9 @@ def _render_insert_guidance(config: AppConfig, table_uri: str) -> None:
         - Prefer pandas for familiar scalar/text/vector appends, PyArrow for exact Arrow types, and
           `LanceModel` when you want Pydantic validation before writing.
         - Use inline Arrow `binary` for small payloads such as thumbnails. Use Lance Blob v2
-          columns for larger images or file-like/partial-read workflows; Blob v2 requires tables
-          written with `data_storage_version="2.2"` or newer.
+          columns for larger images or file-like/partial-read workflows. Set
+          `new_table_data_storage_version="2.2"` in the connection's `storage_options` when
+          creating Blob v2 tables.
         - Writes create new table versions. After many small appends, deletes, or index-backed
           updates, run `table.optimize()` during a maintenance window to compact fragments, prune
           old data when configured, and incorporate newly written rows into existing indexes.
@@ -178,6 +184,77 @@ def _render_insert_guidance(config: AppConfig, table_uri: str) -> None:
             template_directory=template_dir,
             label="Code export: Update rows with a SQL predicate",
         )
+
+
+def _render_schema(
+    config: AppConfig,
+    table_uri: str,
+    table_reference: int | str | None,
+    generation: int,
+    snapshot: dict[str, object],
+) -> None:
+    """Render the selected schema and a reusable LanceModel definition."""
+
+    rows = list(snapshot["schema"])
+    top_level = [row for row in rows if "." not in str(row["path"])]
+    nullable = sum(bool(row["nullable"]) for row in top_level)
+    nested = len(rows) - len(top_level)
+    vector_fields = sum("fixed_size_list" in str(row["type"]) for row in top_level)
+
+    summary = st.columns(4)
+    summary[0].metric("Fields", len(top_level))
+    summary[1].metric("Nullable", nullable)
+    summary[2].metric("Nested fields", nested)
+    summary[3].metric("Vector fields", vector_fields)
+
+    st.subheader("Fields")
+    st.dataframe(
+        pd.DataFrame(rows),
+        width="stretch",
+        hide_index=True,
+        column_order=("path", "type", "nullable", "metadata"),
+        column_config={
+            "path": st.column_config.TextColumn("Field"),
+            "type": st.column_config.TextColumn("Arrow type"),
+            "nullable": st.column_config.CheckboxColumn("Nullable"),
+            "metadata": st.column_config.JsonColumn("Metadata"),
+        },
+    )
+
+    with st.expander("Raw Arrow schema", icon=":material/account_tree:"):
+        st.code(str(snapshot["schema_string"]), language="text")
+        metadata = snapshot.get("table_metadata")
+        if metadata:
+            st.caption("Schema metadata")
+            st.json(metadata)
+
+    st.subheader("Standalone LanceModel")
+    st.caption(
+        "A copy-ready Pydantic model for validating rows or creating a compatible table. "
+        "Its `to_arrow_schema()` override retains Arrow details that Python annotations cannot "
+        "express on their own."
+    )
+    try:
+        export = cached_lance_model_export(
+            table_uri,
+            table_reference,
+            str(snapshot["name"]),
+            snapshot["version"],
+            generation,
+        )
+    except Exception as exc:
+        st.warning(f"Unable to generate a LanceModel for this schema: {exc}")
+        return
+
+    for note in export["notes"]:
+        st.warning(str(note), icon=":material/warning:")
+    show_code_export(
+        "schema_lance_model",
+        {"model_source": export["source"]},
+        template_directory=template_directory(config),
+        label=f"{export['model_name']} (standalone Python)",
+        expanded=True,
+    )
 
 
 def render(config: AppConfig) -> None:
@@ -265,9 +342,14 @@ def render(config: AppConfig) -> None:
     with insert_tab:
         _render_insert_guidance(config, table_uri)
     with schema_tab:
-        st.caption("Arrow schema", help=help_text("schema"))
-        st.dataframe(pd.DataFrame(snapshot["schema"]), width="stretch")
-        st.code(snapshot["schema_string"], language="text")
+        st.caption("Arrow schema and reusable model", help=help_text("schema"))
+        _render_schema(
+            config,
+            table_uri,
+            table_reference,
+            generation,
+            snapshot,
+        )
     with versions_tab:
         st.caption("Table history and tags", help=help_text("versions"))
         st.info(

@@ -2,12 +2,29 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from importlib import import_module
 from typing import Any, Literal
 
 import pyarrow as pa
+from lancedb.index import (
+    FTS,
+    Bitmap,
+    BTree,
+    Fm,
+    HnswFlat,
+    HnswPq,
+    HnswSq,
+    IvfFlat,
+    IvfHnswFlat,
+    IvfHnswPq,
+    IvfHnswSq,
+    IvfPq,
+    IvfRq,
+    IvfSq,
+    LabelList,
+)
 
 from lance_explorer.language_models import (
+    configure_packaged_language_model,
     fts_uses_packaged_language_model,
     model_backed_tokenizers,
 )
@@ -54,25 +71,23 @@ class IndexDefinition:
     """UI and construction metadata for one LanceDB index type."""
 
     key: str
-    class_name: str
+    config_type: type[Any]
     label: str
     description: str
     compatible: Compatibility
     category: IndexCategory = "scalar"
     template: str = "create_index"
 
-    def available(self) -> bool:
-        """Return whether the installed LanceDB SDK exposes this index class."""
+    @property
+    def class_name(self) -> str:
+        """Return the public class name used by generated Python."""
 
-        module = import_module("lancedb.index")
-        return hasattr(module, self.class_name)
+        return self.config_type.__name__
 
     def create_config(self, **kwargs: Any) -> Any:
-        """Instantiate the LanceDB index configuration for this definition."""
+        """Instantiate this index configuration."""
 
-        module = import_module("lancedb.index")
-        index_class = getattr(module, self.class_name)
-        return index_class(**kwargs)
+        return self.config_type(**kwargs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,28 +103,28 @@ class FtsPreset:
 INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
     IndexDefinition(
         "BTREE",
-        "BTree",
+        BTree,
         "B-tree",
         "Best for selective equality and range filters on mostly unique values.",
         _scalar,
     ),
     IndexDefinition(
         "BITMAP",
-        "Bitmap",
+        Bitmap,
         "Bitmap",
         "Best for low-cardinality columns such as statuses or categories.",
         _scalar,
     ),
     IndexDefinition(
         "LABEL_LIST",
-        "LabelList",
+        LabelList,
         "Label list",
         "Best for array membership filters on primitive list columns.",
         _list,
     ),
     IndexDefinition(
         "FM",
-        "Fm",
+        Fm,
         "FM",
         "Best for raw substring searches in paths, URLs, identifiers, or logs.",
         _string,
@@ -117,7 +132,7 @@ INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
     ),
     IndexDefinition(
         "FTS",
-        "FTS",
+        FTS,
         "Full-text search",
         "Best for BM25-ranked keyword and phrase search over natural language.",
         _string,
@@ -125,7 +140,7 @@ INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
     ),
     IndexDefinition(
         "IVF_FLAT",
-        "IvfFlat",
+        IvfFlat,
         "IvfFlat - Inverted File Flat, raw vectors",
         "Best for IVF partitioning without vector compression.",
         _float_vector,
@@ -133,7 +148,7 @@ INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
     ),
     IndexDefinition(
         "IVF_PQ",
-        "IvfPq",
+        IvfPq,
         "IvfPq - Inverted File with Product Quantization",
         "Best for smaller indexes with good recall on lower-dimensional vectors.",
         _float_vector,
@@ -141,7 +156,7 @@ INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
     ),
     IndexDefinition(
         "IVF_SQ",
-        "IvfSq",
+        IvfSq,
         "IvfSq - Inverted File with Scalar Quantization",
         "Best for balanced vector compression, latency, and recall.",
         _float_vector,
@@ -149,7 +164,7 @@ INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
     ),
     IndexDefinition(
         "IVF_RQ",
-        "IvfRq",
+        IvfRq,
         "IvfRq - Inverted File with RaBitQ Quantization",
         "Best for high compression on large, high-dimensional vector datasets.",
         _float_vector,
@@ -157,7 +172,7 @@ INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
     ),
     IndexDefinition(
         "IVF_HNSW_FLAT",
-        "IvfHnswFlat",
+        IvfHnswFlat,
         "IvfHnswFlat - Inverted File plus Hierarchical Navigable Small World, raw vectors",
         "Best for high recall with IVF partitioning and no compression.",
         _float_vector,
@@ -165,7 +180,7 @@ INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
     ),
     IndexDefinition(
         "IVF_HNSW_PQ",
-        "IvfHnswPq",
+        IvfHnswPq,
         "IvfHnswPq - Inverted File plus Hierarchical Navigable Small World "
         "with Product Quantization",
         "Best for HNSW recall with product-quantized storage.",
@@ -174,7 +189,7 @@ INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
     ),
     IndexDefinition(
         "IVF_HNSW_SQ",
-        "IvfHnswSq",
+        IvfHnswSq,
         "IvfHnswSq - Inverted File plus Hierarchical Navigable Small World "
         "with Scalar Quantization",
         "Best for HNSW recall with scalar-quantized storage.",
@@ -183,7 +198,7 @@ INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
     ),
     IndexDefinition(
         "HNSW_FLAT",
-        "HnswFlat",
+        HnswFlat,
         "HnswFlat - Hierarchical Navigable Small World, raw vectors",
         "Best for high recall graph search without compression.",
         _float_vector,
@@ -191,7 +206,7 @@ INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
     ),
     IndexDefinition(
         "HNSW_PQ",
-        "HnswPq",
+        HnswPq,
         "HnswPq - Hierarchical Navigable Small World with Product Quantization",
         "Best for graph search with product-quantized vectors.",
         _float_vector,
@@ -199,7 +214,7 @@ INDEX_DEFINITIONS: tuple[IndexDefinition, ...] = (
     ),
     IndexDefinition(
         "HNSW_SQ",
-        "HnswSq",
+        HnswSq,
         "HnswSq - Hierarchical Navigable Small World with Scalar Quantization",
         "Best for graph search with scalar-quantized vectors.",
         _float_vector,
@@ -344,29 +359,41 @@ FTS_PRESETS: dict[str, FtsPreset] = {
 }
 
 
-def available_index_definitions() -> list[IndexDefinition]:
-    """Return registry entries supported by the installed LanceDB SDK."""
-
-    return [definition for definition in INDEX_DEFINITIONS if definition.available()]
-
-
 def compatible_index_definitions(data_type: pa.DataType) -> list[IndexDefinition]:
-    """Return available index definitions compatible with an Arrow data type."""
+    """Return index definitions compatible with an Arrow data type."""
 
     return [
         definition
-        for definition in available_index_definitions()
+        for definition in INDEX_DEFINITIONS
         if definition.compatible(data_type)
     ]
 
 
 def get_index_definition(key: str) -> IndexDefinition:
-    """Return an available index definition by stable registry key."""
+    """Return an index definition by stable registry key."""
 
-    for definition in available_index_definitions():
+    for definition in INDEX_DEFINITIONS:
         if definition.key == key:
             return definition
-    raise KeyError(f"Index type is unavailable: {key}")
+    raise KeyError(f"Unknown index type: {key}")
+
+
+def create_table_index(
+    table: Any,
+    *,
+    column: str,
+    index_type: str,
+    config_options: dict[str, Any] | None = None,
+    name: str | None = None,
+    replace: bool = False,
+) -> None:
+    """Create an index with LanceDB's unified configuration API."""
+
+    options = dict(config_options or {})
+    if index_type == "FTS" and fts_uses_packaged_model(options):
+        configure_packaged_language_model(str(options["base_tokenizer"]))
+    config = get_index_definition(index_type).create_config(**options)
+    table.create_index(column, config=config, name=name, replace=replace)
 
 
 def fts_options_for_preset(key: str) -> dict[str, object]:

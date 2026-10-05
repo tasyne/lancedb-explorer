@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -100,31 +101,33 @@ def run(argv: Sequence[str] | None = None) -> int:
         except Exception as exc:
             print(f"Unable to create demo data: {exc}", file=sys.stderr)
             return 1
-        binary_note = (
-            "Full headshots use Lance Blob v2 storage."
-            if result.blob_v2_enabled
-            else (
-                "Full headshots use Arrow binary fallback because Lance Blob v2 is unavailable "
-                "in this environment."
-            )
-        )
         print(
             "Created demo Lance table "
             f"{result.table_uri} with {result.row_count} rows across "
             f"{result.version_count} versions using Faker locale {result.locale}. "
             f"Included image binary/blob columns {', '.join(DEMO_BINARY_COLUMNS)}. "
-            f"{binary_note} "
+            "Full headshots use Lance Blob v2 storage. "
             f"Created indexes {DEMO_VECTOR_INDEX_NAME} on embedding and "
-            f"{DEMO_FTS_INDEX_NAME} on bio using the {result.fts_preset} FTS preset "
-            f"({result.fts_base_tokenizer} tokenizer). "
+            f"{DEMO_FTS_INDEX_NAME} on bio using the MULTILINGUAL FTS preset "
+            "(icu tokenizer). "
             f"Created demo tags: {', '.join(result.tags) if result.tags else 'none'}. "
             f"Namespace copy: {result.namespace_table_ref or 'not created'}."
         )
         return 0
 
-    app_path = Path(__file__).with_name("app.py")
+    app_path = Path(__file__).resolve().with_name("app.py")
+    package_root = str(app_path.parent.parent)
+    child_env = os.environ.copy()
+    existing_pythonpath = child_env.get("PYTHONPATH")
+    child_env["PYTHONPATH"] = (
+        os.pathsep.join((package_root, existing_pythonpath))
+        if existing_pythonpath
+        else package_root
+    )
+    child_env.setdefault("LANCE_INCLUDE_VECTOR_CENTROIDS", "false")
     return subprocess.call(
-        [sys.executable, "-m", "streamlit", "run", str(app_path), *streamlit_args]
+        [sys.executable, "-m", "streamlit", "run", str(app_path), *streamlit_args],
+        env=child_env,
     )
 
 

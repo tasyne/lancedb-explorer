@@ -6,9 +6,8 @@ For design details, see [PLAN.md](PLAN.md).
 
 ## Install
 
-Requires Python `>=3.12,<3.14`.
-LanceDB `>=0.34.0` is recommended. LanceDB `0.33.x` can run with reduced binary support on
-systems that cannot install newer LanceDB wheels.
+Requires Python `>=3.12,<3.14` and LanceDB `>=0.39,<0.40`. The upper bound intentionally tracks
+the latest stable LanceDB minor line; preview releases are not part of the supported target.
 
 ```bash
 python -m venv .venv
@@ -23,22 +22,6 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
 ```
-
-## LanceDB Compatibility
-
-Lance Explorer supports LanceDB `0.33.x`, but `0.34.0+` is the preferred target. This matters
-because generated code mirrors the installed SDK's public API where possible.
-
-| Area | LanceDB 0.33.x | LanceDB 0.34.0+ |
-| --- | --- | --- |
-| Index creation API | Uses older public helpers such as `create_scalar_index`, `create_fts_index`, and legacy vector `create_index(...)` arguments. | Supports unified `create_index(column, config=...)` snippets. |
-| Vector index choices | Limited to legacy public vector index types exposed by the installed SDK. | Newer config classes can be used directly when available. |
-| Binary demo data | Full headshots fall back to Arrow `binary`. | Full headshots use Lance Blob v2 when the `lance` helpers are available. |
-| Demo FTS index | Uses the English/simple tokenizer preset. | Uses the multilingual ICU preset. |
-| Code exports | Include compatibility fallbacks for index creation and avoid newer-only version arguments where practical. | Prefer the newer config-style API while keeping copied snippets portable. |
-
-The app displays a warning when LanceDB is older than `0.34.0`. Older deployments can still be
-useful, but some LanceDB capabilities are genuinely unavailable rather than hidden by the UI.
 
 ## Run
 
@@ -75,7 +58,7 @@ Defaults: 100 fictional movie-star rows, Faker locale `usa`, 3 table versions, a
 `embedding` column, bundled PNG headshots, `embedding_vector_idx` on `embedding`, and
 `bio_multilingual_fts_idx` on `bio`. Version 2 adds `publicity_risk` so schema diffing has
 something visible. Demo tags `initial_load` and `gala` mark the first load and a later demo state.
-When LanceDB namespace APIs are available, the CLI also creates a namespace-backed copy at
+The CLI also creates a namespace-backed copy at
 `demo/movie_stars/<table_name>` under the same catalog root so the Namespace Explorer has data to
 browse.
 
@@ -112,9 +95,8 @@ depending on sub-vector settings.
 
 Demo headshots are PNG fixtures derived from Random User Generator portrait URLs and bundled under
 `src/lance_explorer/demo_assets/headshots`. The demo stores thumbnails as inline Arrow `binary`
-values. With LanceDB `>=0.34.0`, full images use Lance Blob v2 values so the UI can show the
-difference between small row-local binary payloads and larger blob-backed payloads. With LanceDB
-`0.33.x`, full images fall back to Arrow `binary` so demo creation can still proceed.
+values and full images as Lance Blob v2 values, showing the difference between small row-local
+binary payloads and larger blob-backed payloads.
 
 ## Using the App
 
@@ -132,8 +114,8 @@ difference between small row-local binary payloads and larger blob-backed payloa
 
 ## Namespaces
 
-Namespaces require LanceDB `0.34.0+`. Use Explorer > Namespace Explorer to open a catalog root
-such as `./local_lancedb` or `s3://bucket/lance-root`, browse the namespace tree, add child
+Use Explorer > Namespace Explorer to open a catalog root such as `./local_lancedb` or
+`s3://bucket/lance-root`, browse the namespace tree, add child
 namespaces beside any node, drop namespaces with confirmation, and select tables inside them.
 Namespace-selected tables appear in table history with an `ns:` label and use an internal
 `lance-ns://...` reference so other pages can open, query, compare, index, and maintain them.

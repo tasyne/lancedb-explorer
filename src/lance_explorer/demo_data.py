@@ -9,11 +9,10 @@ from typing import Any
 import lancedb
 import pyarrow as pa
 from faker import Faker
+from lance import blob_array, blob_field
 
-from lance_explorer.compat import lance_blob_v2_available, lancedb_supports_fts_icu
 from lance_explorer.config import lancedb_storage_options_from_env
-from lance_explorer.index_compat import create_table_index
-from lance_explorer.index_registry import fts_options_for_preset
+from lance_explorer.index_registry import create_table_index, fts_options_for_preset
 from lance_explorer.paths import has_uri_scheme, split_table_uri
 from lance_explorer.table_refs import format_namespace_table_ref, namespace_path_from_text
 
@@ -64,33 +63,9 @@ DEMO_BINARY_COLUMNS = (
 )
 
 
-try:
-    from lance import blob_array as _lance_blob_array
-    from lance import blob_field as _lance_blob_field
-except Exception:
-    _lance_blob_array = None
-    _lance_blob_field = None
+def demo_schema() -> pa.Schema:
+    """Return the demo schema with inline thumbnails and Blob v2 full images."""
 
-
-def supports_blob_v2() -> bool:
-    """Return whether demo data can use Lance Blob v2 storage."""
-
-    return (
-        lance_blob_v2_available()
-        and _lance_blob_array is not None
-        and _lance_blob_field is not None
-    )
-
-
-def demo_schema(*, use_blob_v2: bool | None = None) -> pa.Schema:
-    """Return the demo schema with Blob v2 or Arrow binary full-image storage."""
-
-    use_blob = supports_blob_v2() if use_blob_v2 is None else use_blob_v2
-    full_image_field = (
-        _lance_blob_field("headshot_full_bytes")
-        if use_blob and _lance_blob_field is not None
-        else pa.field("headshot_full_bytes", pa.binary())
-    )
     return pa.schema(
         [
             pa.field("id", pa.int64()),
@@ -111,7 +86,7 @@ def demo_schema(*, use_blob_v2: bool | None = None) -> pa.Schema:
             pa.field("headshot_filename", pa.string()),
             pa.field("headshot_mime", pa.string()),
             pa.field("headshot_thumbnail_bytes", pa.binary()),
-            full_image_field,
+            blob_field("headshot_full_bytes"),
         ]
     )
 
@@ -154,9 +129,6 @@ class DemoTableResult:
     row_count: int
     version_count: int
     locale: str
-    blob_v2_enabled: bool = False
-    fts_preset: str = "MULTILINGUAL"
-    fts_base_tokenizer: str = "icu"
     tags: tuple[str, ...] = ()
     namespace_table_ref: str | None = None
     namespace_path: tuple[str, ...] = ()
@@ -274,14 +246,12 @@ def _base_schema_row(row: dict[str, Any], schema: pa.Schema) -> dict[str, Any]:
 def _arrow_table_from_rows(
     rows: list[dict[str, Any]],
     schema: pa.Schema,
-    *,
-    use_blob_v2: bool,
 ) -> pa.Table:
     arrays = []
     for field in schema:
         values = [row.get(field.name) for row in rows]
-        if field.name == "headshot_full_bytes" and use_blob_v2 and _lance_blob_array is not None:
-            arrays.append(_lance_blob_array(values))
+        if field.name == "headshot_full_bytes":
+            arrays.append(blob_array(values))
         else:
             arrays.append(pa.array(values, type=field.type))
     return pa.Table.from_arrays(arrays, schema=schema)
@@ -300,10 +270,10 @@ def _create_demo_vector_index(table: Any, row_count: int) -> None:
     )
 
 
-def _create_demo_fts_index(table: Any) -> tuple[str, dict[str, object]]:
-    """Create the demo table's default full-text index for this LanceDB version."""
+def _create_demo_fts_index(table: Any) -> None:
+    """Create the demo table's default multilingual full-text index."""
 
-    fts_preset, fts_options = demo_fts_index_options()
+    _, fts_options = demo_fts_index_options()
     create_table_index(
         table,
         column="bio",
@@ -312,36 +282,27 @@ def _create_demo_fts_index(table: Any) -> tuple[str, dict[str, object]]:
         name=DEMO_FTS_INDEX_NAME,
         replace=True,
     )
-    return fts_preset, fts_options
 
 
 def _create_demo_tags(table: Any, *, gala_version: int) -> tuple[str, ...]:
-    """Tag stable demo versions when LanceDB exposes the tags API."""
+    """Tag the initial and final demo versions."""
 
-    tags = getattr(table, "tags", None)
-    if tags is None:
-        return ()
-    created: list[str] = []
+    existing = table.tags.list()
     for tag_name, version in (
         (DEMO_INITIAL_LOAD_TAG, 1),
         (DEMO_GALA_TAG, gala_version),
     ):
-        try:
-            existing = tags.list()
-            if tag_name in existing:
-                tags.update(tag_name, version)
-            else:
-                tags.create(tag_name, version)
-            created.append(tag_name)
-        except Exception:
-            continue
-    return tuple(created)
+        if tag_name in existing:
+            table.tags.update(tag_name, version)
+        else:
+            table.tags.create(tag_name, version)
+    return DEMO_INITIAL_LOAD_TAG, DEMO_GALA_TAG
 
 
 def demo_fts_index_options() -> tuple[str, dict[str, object]]:
-    """Return FTS options supported by the installed LanceDB version."""
+    """Return the demo table's multilingual FTS options."""
 
-    preset = "MULTILINGUAL" if lancedb_supports_fts_icu() else "ENGLISH"
+    preset = "MULTILINGUAL"
     return preset, fts_options_for_preset(preset)
 
 
@@ -355,17 +316,10 @@ def _resolved_namespace_path(value: str | tuple[str, ...] | None) -> tuple[str, 
 
 def _create_namespace_path(db: Any, namespace_path: tuple[str, ...]) -> None:
     for index in range(1, len(namespace_path) + 1):
-        try:
-            existing = db.list_namespaces(list(namespace_path[: index - 1])).namespaces
-        except Exception:
-            existing = []
-        if namespace_path[index - 1] in existing:
-            continue
-        try:
-            db.create_namespace(list(namespace_path[:index]), mode="exist_ok")
-        except Exception as exc:
-            if "already exists" not in str(exc).lower():
-                raise
+        parent = list(namespace_path[: index - 1])
+        existing = db.list_namespaces(parent).namespaces
+        if namespace_path[index - 1] not in existing:
+            db.create_namespace(list(namespace_path[:index]), mode="create")
 
 
 def _write_demo_table(
@@ -376,24 +330,19 @@ def _write_demo_table(
     chunk_sizes: list[int],
     base_schema: pa.Schema,
     versioned_schema: pa.Schema,
-    use_blob_v2: bool,
     row_count: int,
     overwrite: bool,
     namespace_path: tuple[str, ...] | None = None,
-) -> tuple[tuple[str, ...], str, dict[str, object], int]:
+) -> tuple[str, ...]:
     """Write the versioned demo table either directly or inside a namespace."""
 
     create_options: dict[str, Any] = {}
     if namespace_path is not None:
         create_options["namespace_path"] = list(namespace_path)
-    if use_blob_v2:
-        create_options["data_storage_version"] = "2.2"
-
     first_chunk_size = chunk_sizes[0]
     data = _arrow_table_from_rows(
         [_base_schema_row(row, base_schema) for row in rows[:first_chunk_size]],
         base_schema,
-        use_blob_v2=use_blob_v2,
     )
     table = db.create_table(
         table_name,
@@ -411,15 +360,14 @@ def _write_demo_table(
             _arrow_table_from_rows(
                 rows[offset : offset + chunk_size],
                 versioned_schema,
-                use_blob_v2=use_blob_v2,
             )
         )
         offset += chunk_size
 
     demo_tags = _create_demo_tags(table, gala_version=int(table.version))
     _create_demo_vector_index(table, row_count)
-    fts_preset, fts_options = _create_demo_fts_index(table)
-    return demo_tags, fts_preset, fts_options, int(table.version)
+    _create_demo_fts_index(table)
+    return demo_tags
 
 
 def create_demo_table(
@@ -452,32 +400,34 @@ def create_demo_table(
     )
     row_chunk_count = max(1, version_count - 1)
     chunk_sizes = _chunk_sizes(row_count, row_chunk_count)
-    use_blob_v2 = supports_blob_v2()
-    base_schema = demo_schema(use_blob_v2=use_blob_v2)
+    base_schema = demo_schema()
     versioned_schema = base_schema.append(DEMO_VERSIONED_FIELD)
+    storage_options = {
+        **lancedb_storage_options_from_env(),
+        "new_table_data_storage_version": "2.2",
+    }
     db = lancedb.connect(
         location.database_uri,
-        storage_options=lancedb_storage_options_from_env() or None,
+        storage_options=storage_options,
     )
-    demo_tags, fts_preset, fts_options, _direct_version = _write_demo_table(
+    demo_tags = _write_demo_table(
         db,
         location.table_name,
         rows=rows,
         chunk_sizes=chunk_sizes,
         base_schema=base_schema,
         versioned_schema=versioned_schema,
-        use_blob_v2=use_blob_v2,
         row_count=row_count,
         overwrite=overwrite,
     )
 
     resolved_namespace_path = _resolved_namespace_path(namespace_path)
     namespace_table_ref = None
-    if resolved_namespace_path and hasattr(lancedb, "connect_namespace"):
+    if resolved_namespace_path:
         namespace_db = lancedb.connect_namespace(
             "dir",
             {"root": location.database_uri},
-            storage_options=lancedb_storage_options_from_env() or None,
+            storage_options=storage_options,
         )
         _create_namespace_path(namespace_db, resolved_namespace_path)
         _write_demo_table(
@@ -487,7 +437,6 @@ def create_demo_table(
             chunk_sizes=chunk_sizes,
             base_schema=base_schema,
             versioned_schema=versioned_schema,
-            use_blob_v2=use_blob_v2,
             row_count=row_count,
             overwrite=overwrite,
             namespace_path=resolved_namespace_path,
@@ -505,9 +454,6 @@ def create_demo_table(
         row_count=row_count,
         version_count=version_count,
         locale=resolved_locale,
-        blob_v2_enabled=use_blob_v2,
-        fts_preset=fts_preset,
-        fts_base_tokenizer=str(fts_options.get("base_tokenizer", "")),
         tags=demo_tags,
         namespace_table_ref=namespace_table_ref,
         namespace_path=resolved_namespace_path or (),

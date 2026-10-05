@@ -1,0 +1,23 @@
+# Requires pylance >= 9.0.
+import lance
+
+TABLE_URI = "s3://bucket/dataset.lance"
+
+{% if recurring_load %}def maintain_after_appends():
+    """Run on a fragment-count or time threshold, never after every append."""
+    dataset = lance.dataset(TABLE_URI)
+{% if load_pattern == "frequent small appends" %}    # Keep this outside peak ingestion and do not overlap it with index construction.
+{% elif load_pattern == "regular batch" %}    # Run after several batches have accumulated undersized fragments.
+{% else %}    # Run only when occasional deliveries have accumulated undersized tail fragments.
+{% endif %}
+    dataset.optimize.compact_files(
+        target_rows_per_fragment={{ target_rows_per_fragment }},
+{% if has_indexes %}        defer_index_remap=True,
+{% endif %}    )
+{% if has_indexes %}    # Extend existing indexes to newly appended fragments after compaction.
+    dataset.optimize.optimize_indices()
+{% endif %}{% else %}def compact_initial_tail_fragments():
+    """Run once only if the bulk load left undersized fragments."""
+    dataset = lance.dataset(TABLE_URI)
+    dataset.optimize.compact_files(target_rows_per_fragment={{ target_rows_per_fragment }})
+{% endif %}

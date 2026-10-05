@@ -3,7 +3,7 @@ import pandas as pd
 from urllib.parse import parse_qs, unquote, urlparse
 
 
-def open_table(table_uri: str, version: int | None = None):
+def open_table(table_uri: str, version: int | str | None = None):
     if table_uri.startswith("lance-ns://"):
         # Namespace references must be resolved through LanceDB's catalog API.
         parsed = urlparse(table_uri)
@@ -17,13 +17,20 @@ def open_table(table_uri: str, version: int | None = None):
             {"root": root},
             storage_options=storage_options or None,
         )
-        table = db.open_table(table_name, namespace_path=namespace_path)
+        table = db.open_table(
+            table_name,
+            namespace_path=namespace_path,
+            version=version if isinstance(version, int) else None,
+        )
     else:
         # Direct table URIs open from local disk, S3, or another object-store path.
         path = UPath(table_uri)
         db = lancedb.connect(str(path.parent), storage_options=storage_options or None)
-        table = db.open_table(path.name.removesuffix(".lance"))
-    if version is not None:
+        table = db.open_table(
+            path.name.removesuffix(".lance"),
+            version=version if isinstance(version, int) else None,
+        )
+    if isinstance(version, str):
         table.checkout(version)
     return table
 

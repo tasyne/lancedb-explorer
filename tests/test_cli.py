@@ -1,3 +1,5 @@
+import os
+
 from lance_explorer import cli
 from lance_explorer.demo_data import DemoTableResult
 
@@ -71,12 +73,31 @@ def test_cli_create_demo_data_dispatches_to_generator(monkeypatch, capsys) -> No
 def test_cli_launches_streamlit_by_default(monkeypatch) -> None:
     calls = {}
 
-    def fake_call(command):
+    def fake_call(command, *, env):
         calls["command"] = command
+        calls["env"] = env
         return 0
 
     monkeypatch.setattr(cli.subprocess, "call", fake_call)
+    monkeypatch.delenv("LANCE_INCLUDE_VECTOR_CENTROIDS", raising=False)
 
     assert cli.run(["--server.port", "8502"]) == 0
     assert calls["command"][:4] == [cli.sys.executable, "-m", "streamlit", "run"]
     assert calls["command"][-2:] == ["--server.port", "8502"]
+    package_root = str(cli.Path(cli.__file__).resolve().parent.parent)
+    assert calls["env"]["PYTHONPATH"].split(os.pathsep)[0] == package_root
+    assert calls["env"]["LANCE_INCLUDE_VECTOR_CENTROIDS"] == "false"
+
+
+def test_cli_preserves_explicit_vector_centroid_setting(monkeypatch) -> None:
+    calls = {}
+
+    def fake_call(command, *, env):
+        calls["env"] = env
+        return 0
+
+    monkeypatch.setattr(cli.subprocess, "call", fake_call)
+    monkeypatch.setenv("LANCE_INCLUDE_VECTOR_CENTROIDS", "true")
+
+    assert cli.run([]) == 0
+    assert calls["env"]["LANCE_INCLUDE_VECTOR_CENTROIDS"] == "true"

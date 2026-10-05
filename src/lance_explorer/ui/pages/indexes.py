@@ -4,12 +4,11 @@ import pandas as pd
 import streamlit as st
 
 from lance_explorer.config import AppConfig
-from lance_explorer.index_compat import index_type_supported_by_installed_lancedb
 from lance_explorer.index_registry import (
     FTS_BASE_TOKENIZERS,
     FTS_LANGUAGES,
     FTS_PRESETS,
-    available_index_definitions,
+    INDEX_DEFINITIONS,
     compatible_index_definitions,
     fts_options_for_preset,
     fts_uses_packaged_model,
@@ -497,7 +496,7 @@ def _render_create_index_tab(
 
     st.subheader("Create index", help=help_text("create_index"))
     with st.popover("Index type guide", icon=":material/info:"):
-        for index_definition in available_index_definitions():
+        for index_definition in INDEX_DEFINITIONS:
             st.markdown(f"**{index_definition.label}** - {index_definition.description}")
         st.caption(
             "After writes, Optimize folds new rows into existing indexes. Vector index "
@@ -511,11 +510,7 @@ def _render_create_index_tab(
     st.caption(
         f"Detected Arrow type: `{field.type}`. Available index types are filtered by this type."
     )
-    definitions = [
-        definition
-        for definition in compatible_index_definitions(field.type)
-        if index_type_supported_by_installed_lancedb(definition.key)
-    ]
+    definitions = compatible_index_definitions(field.type)
     if not definitions:
         st.warning(f"No registered index type supports {field.type}.")
         return
